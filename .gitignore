@@ -1,0 +1,12 @@
+.DS_Store
+
+node_modules/
+dist/
+target/
+logs/
+
+.idea/
+.vscode/
+*.iml
+
+*.log

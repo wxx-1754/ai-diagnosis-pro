@@ -1,0 +1,31 @@
+server:
+  port: 9001
+
+spring:
+  application:
+    name: ai-diagnosis-backend
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:ai_diagnosis}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
+logging:
+  file:
+    path: ${LOG_PATH:logs}
+  level:
+    root: ${LOG_LEVEL_ROOT:INFO}
+    com.wuxx.diagnosis: ${LOG_LEVEL_APP:INFO}
+    org.mybatis: INFO
+    org.springframework.jdbc: INFO
+
+diagnosis:
+  arthas:
+    connect-timeout-ms: 3000
+    read-timeout-ms: 10000
+    max-output-length: 20000
+    audit-output-excerpt-length: 4000
