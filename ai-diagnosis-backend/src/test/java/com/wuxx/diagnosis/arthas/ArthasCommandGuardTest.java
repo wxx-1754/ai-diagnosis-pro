@@ -14,8 +14,10 @@ class ArthasCommandGuardTest {
         assertThatCode(() -> guard.check("dashboard -n 1")).doesNotThrowAnyException();
         assertThatCode(() -> guard.check("thread")).doesNotThrowAnyException();
         assertThatCode(() -> guard.check("thread -n 5")).doesNotThrowAnyException();
+        assertThatCode(() -> guard.check("thread -b")).doesNotThrowAnyException();
         assertThatCode(() -> guard.check("jvm")).doesNotThrowAnyException();
         assertThatCode(() -> guard.check("memory")).doesNotThrowAnyException();
+        assertThatCode(() -> guard.check("trace com.demo.OrderService createOrder -n 3")).doesNotThrowAnyException();
     }
 
     @Test
@@ -25,6 +27,12 @@ class ArthasCommandGuardTest {
         assertThatThrownBy(() -> guard.check("dashboard -n 10"))
                 .isInstanceOf(SecurityException.class);
         assertThatThrownBy(() -> guard.check("thread -n 20"))
+                .isInstanceOf(SecurityException.class);
+        assertThatThrownBy(() -> guard.check("thread -b 1"))
+                .isInstanceOf(SecurityException.class);
+        assertThatThrownBy(() -> guard.check("trace com.demo.OrderService createOrder -n 10"))
+                .isInstanceOf(SecurityException.class);
+        assertThatThrownBy(() -> guard.check("trace com.demo.OrderService;shutdown createOrder -n 3"))
                 .isInstanceOf(SecurityException.class);
         assertThatThrownBy(() -> guard.check("jvm; shutdown"))
                 .isInstanceOf(SecurityException.class);

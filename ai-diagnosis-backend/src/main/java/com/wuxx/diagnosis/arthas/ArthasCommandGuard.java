@@ -11,13 +11,15 @@ public class ArthasCommandGuard {
             "dashboard",
             "thread",
             "jvm",
-            "memory"
+            "memory",
+            "trace"
     );
 
     private static final Set<String> ALLOWED_COMMANDS = Set.of(
             "dashboard -n 1",
             "thread",
             "thread -n 5",
+            "thread -b",
             "jvm",
             "memory"
     );
@@ -32,8 +34,7 @@ public class ArthasCommandGuard {
             "stop",
             "shutdown",
             "logger",
-            "watch",
-            "trace"
+            "watch"
     );
 
     public void check(String command) {
@@ -55,9 +56,32 @@ public class ArthasCommandGuard {
             throw new SecurityException("Unsupported Arthas command: " + prefix);
         }
 
-        // 第一阶段只允许固定命令全集，不能放开 thread/dashboard 的任意参数。
+        if (normalized.startsWith("trace")) {
+            checkTraceCommand(normalized);
+            return;
+        }
+
         if (!ALLOWED_COMMANDS.contains(normalized)) {
             throw new SecurityException("Unsupported Arthas command detail: " + normalized);
+        }
+    }
+
+    private void checkTraceCommand(String command) {
+        String[] parts = command.split("\\s+");
+        if (parts.length != 5) {
+            throw new SecurityException("Only trace {className} {methodName} -n 3 is allowed");
+        }
+        if (!"trace".equals(parts[0])) {
+            throw new SecurityException("Invalid trace command");
+        }
+        if (!parts[1].matches("[a-zA-Z_$][a-zA-Z\\d_$]*(\\.[a-zA-Z_$][a-zA-Z\\d_$]*)*")) {
+            throw new SecurityException("Invalid trace className: " + parts[1]);
+        }
+        if (!parts[2].matches("[a-zA-Z_$][a-zA-Z\\d_$]*")) {
+            throw new SecurityException("Invalid trace methodName: " + parts[2]);
+        }
+        if (!"-n".equals(parts[3]) || !"3".equals(parts[4])) {
+            throw new SecurityException("Only trace -n 3 is allowed");
         }
     }
 

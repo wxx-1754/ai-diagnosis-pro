@@ -11,6 +11,8 @@ public class ArthasCommandRecord {
 
     private String requestNo;
 
+    private String taskNo;
+
     private String appId;
 
     private String env;

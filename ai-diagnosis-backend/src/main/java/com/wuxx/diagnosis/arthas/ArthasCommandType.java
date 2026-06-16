@@ -8,6 +8,7 @@ public enum ArthasCommandType {
     DASHBOARD("dashboard", "dashboard -n 1"),
     THREAD("thread", "thread"),
     TOP_THREAD("topThread", "thread -n 5"),
+    THREAD_BLOCK("threadBlock", "thread -b"),
     JVM("jvm", "jvm"),
     MEMORY("memory", "memory");
 

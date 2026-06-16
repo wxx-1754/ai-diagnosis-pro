@@ -1,9 +1,13 @@
 package com.wuxx.diagnosis.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.wuxx.diagnosis.arthas.ArthasCommandExecutor;
 import com.wuxx.diagnosis.arthas.ArthasCommandFactory;
@@ -12,7 +16,10 @@ import com.wuxx.diagnosis.domain.AppInstance;
 import com.wuxx.diagnosis.domain.ArthasCommandRecord;
 import com.wuxx.diagnosis.domain.ArthasExecuteRequest;
 import com.wuxx.diagnosis.domain.ArthasExecuteResponse;
+import com.wuxx.diagnosis.domain.DiagnoseTask;
+import com.wuxx.diagnosis.domain.DiagnoseTaskStatus;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
+import com.wuxx.diagnosis.mapper.DiagnoseTaskMapper;
 import org.junit.jupiter.api.Test;
 
 class ArthasCommandServiceTest {
@@ -53,7 +60,64 @@ class ArthasCommandServiceTest {
         assertThat(record.getErrorMessage()).isEqualTo("connecti");
     }
 
+    @Test
+    void executeWithTaskNoMarksTaskRunningAndSavesTaskNo() {
+        CapturingExecutor executor = new CapturingExecutor(true);
+        CapturingRecordMapper recordMapper = new CapturingRecordMapper();
+        CapturingDiagnoseTaskMapper taskMapper = new CapturingDiagnoseTaskMapper();
+        taskMapper.save(existingTask("DIAG-1"));
+        ArthasCommandService service = service(executor, recordMapper, taskMapper);
+
+        ArthasExecuteRequest request = request("dashboard");
+        request.setTaskNo("DIAG-1");
+        ArthasExecuteResponse response = service.execute(request);
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(taskMapper.statuses.get("DIAG-1")).isEqualTo(DiagnoseTaskStatus.RUNNING.name());
+        assertThat(recordMapper.records).hasSize(1);
+        assertThat(recordMapper.records.getFirst().getTaskNo()).isEqualTo("DIAG-1");
+    }
+
+    @Test
+    void executeWithMissingTaskNoFailsBeforeDispatch() {
+        CapturingExecutor executor = new CapturingExecutor(true);
+        CapturingRecordMapper recordMapper = new CapturingRecordMapper();
+        ArthasCommandService service = service(executor, recordMapper, new CapturingDiagnoseTaskMapper());
+
+        ArthasExecuteRequest request = request("jvm");
+        request.setTaskNo("DIAG-NOT-FOUND");
+
+        assertThatThrownBy(() -> service.execute(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("诊断任务不存在，taskNo=DIAG-NOT-FOUND");
+        assertThat(executor.command).isNull();
+        assertThat(recordMapper.records).isEmpty();
+    }
+
+    @Test
+    void executeWithTaskNoMarksTaskFailedWhenCommandFails() {
+        CapturingExecutor executor = new CapturingExecutor(false);
+        CapturingRecordMapper recordMapper = new CapturingRecordMapper();
+        CapturingDiagnoseTaskMapper taskMapper = new CapturingDiagnoseTaskMapper();
+        taskMapper.save(existingTask("DIAG-2"));
+        ArthasCommandService service = service(executor, recordMapper, taskMapper);
+
+        ArthasExecuteRequest request = request("jvm");
+        request.setTaskNo("DIAG-2");
+        ArthasExecuteResponse response = service.execute(request);
+
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(taskMapper.statuses.get("DIAG-2")).isEqualTo(DiagnoseTaskStatus.FAILED.name());
+        assertThat(taskMapper.errorMessages.get("DIAG-2")).isEqualTo("connection refused");
+    }
+
     private ArthasCommandService service(ArthasCommandExecutor executor, ArthasCommandRecordMapper recordMapper) {
+        return service(executor, recordMapper, new CapturingDiagnoseTaskMapper());
+    }
+
+    private ArthasCommandService service(ArthasCommandExecutor executor,
+                                         ArthasCommandRecordMapper recordMapper,
+                                         DiagnoseTaskMapper diagnoseTaskMapper) {
         AppInstanceService appInstanceService = new AppInstanceService((appId, env) -> instance());
         DiagnosisArthasProperties properties = new DiagnosisArthasProperties();
         properties.setAuditOutputExcerptLength(8);
@@ -62,7 +126,8 @@ class ArthasCommandServiceTest {
                 new ArthasCommandFactory(),
                 executor,
                 recordMapper,
-                properties
+                properties,
+                new DiagnoseTaskService(diagnoseTaskMapper)
         );
     }
 
@@ -72,6 +137,18 @@ class ArthasCommandServiceTest {
         request.setEnv("test");
         request.setCommandType(commandType);
         return request;
+    }
+
+    private DiagnoseTask existingTask(String taskNo) {
+        DiagnoseTask task = new DiagnoseTask();
+        task.setTaskNo(taskNo);
+        task.setAppId("order-service");
+        task.setEnv("test");
+        task.setDiagnoseType("HIGH_CPU");
+        task.setStatus(DiagnoseTaskStatus.CREATED.name());
+        task.setCreatedAt(LocalDateTime.now());
+        task.setUpdatedAt(LocalDateTime.now());
+        return task;
     }
 
     private AppInstance instance() {
@@ -117,6 +194,54 @@ class ArthasCommandServiceTest {
         @Override
         public int insert(ArthasCommandRecord record) {
             records.add(record);
+            return 1;
+        }
+
+        @Override
+        public List<ArthasCommandRecord> findByTaskNo(String taskNo) {
+            return records.stream()
+                    .filter(record -> taskNo.equals(record.getTaskNo()))
+                    .toList();
+        }
+    }
+
+    private static class CapturingDiagnoseTaskMapper implements DiagnoseTaskMapper {
+
+        private final Map<String, DiagnoseTask> tasks = new HashMap<>();
+
+        private final Map<String, String> statuses = new HashMap<>();
+
+        private final Map<String, String> conclusions = new HashMap<>();
+
+        private final Map<String, String> errorMessages = new HashMap<>();
+
+        void save(DiagnoseTask task) {
+            tasks.put(task.getTaskNo(), task);
+            statuses.put(task.getTaskNo(), task.getStatus());
+        }
+
+        @Override
+        public int insert(DiagnoseTask task) {
+            save(task);
+            return 1;
+        }
+
+        @Override
+        public DiagnoseTask findByTaskNo(String taskNo) {
+            return tasks.get(taskNo);
+        }
+
+        @Override
+        public int updateStatus(String taskNo, String status) {
+            statuses.put(taskNo, status);
+            return 1;
+        }
+
+        @Override
+        public int finishTask(String taskNo, String status, String conclusion, String errorMessage) {
+            statuses.put(taskNo, status);
+            conclusions.put(taskNo, conclusion);
+            errorMessages.put(taskNo, errorMessage);
             return 1;
         }
     }

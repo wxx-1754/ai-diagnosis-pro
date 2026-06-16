@@ -14,6 +14,7 @@ import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 @Slf4j
 @Service
@@ -30,13 +31,23 @@ public class ArthasCommandService {
 
     private final DiagnosisArthasProperties properties;
 
+    private final DiagnoseTaskService diagnoseTaskService;
+
     public ArthasExecuteResponse execute(ArthasExecuteRequest request) {
-        String requestNo = generateRequestNo();
-        AppInstance instance = appInstanceService.getOnlineInstance(request.getAppId(), request.getEnv());
         // 安全边界：外部只传 commandType，真实 Arthas 命令只能从后端固定映射生成。
         String command = commandFactory.buildCommand(request.getCommandType());
-        log.info("Dispatch Arthas command, requestNo={}, appId={}, env={}, commandType={}, command={}",
-                requestNo, request.getAppId(), request.getEnv(), request.getCommandType(), command);
+        return executeCommand(request, command);
+    }
+
+    public ArthasExecuteResponse executeCommand(ArthasExecuteRequest request, String command) {
+        String requestNo = generateRequestNo();
+        if (StringUtils.hasText(request.getTaskNo())) {
+            diagnoseTaskService.markRunning(request.getTaskNo());
+        }
+
+        AppInstance instance = appInstanceService.getOnlineInstance(request.getAppId(), request.getEnv());
+        log.info("Dispatch Arthas command, requestNo={}, taskNo={}, appId={}, env={}, commandType={}, command={}",
+                requestNo, request.getTaskNo(), request.getAppId(), request.getEnv(), request.getCommandType(), command);
 
         ArthasExecuteResponse response = commandExecutor.execute(
                 instance,
@@ -47,6 +58,9 @@ public class ArthasCommandService {
         log.info("Arthas command completed, requestNo={}, success={}, costMillis={}",
                 response.getRequestNo(), response.isSuccess(), response.getCostMillis());
         saveRecordQuietly(request, response);
+        if (StringUtils.hasText(request.getTaskNo()) && !response.isSuccess()) {
+            diagnoseTaskService.markFailed(request.getTaskNo(), response.getErrorMessage());
+        }
         return response;
     }
 
@@ -55,6 +69,7 @@ public class ArthasCommandService {
             // 审计记录是诊断链路的一部分，但保存失败不能覆盖 Arthas 命令本身的执行结果。
             ArthasCommandRecord record = new ArthasCommandRecord();
             record.setRequestNo(response.getRequestNo());
+            record.setTaskNo(request.getTaskNo());
             record.setAppId(response.getAppId());
             record.setEnv(response.getEnv());
             record.setCommand(response.getCommand());

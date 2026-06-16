@@ -4,12 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
-public class ArthasExecuteRequest {
-
-    /**
-     * 诊断任务编号。允许为空，以兼容独立 Arthas 命令调试。
-     */
-    private String taskNo;
+public class DiagnoseTaskCreateRequest {
 
     @NotBlank(message = "appId不能为空")
     private String appId;
@@ -17,7 +12,15 @@ public class ArthasExecuteRequest {
     @NotBlank(message = "env不能为空")
     private String env;
 
-    @NotBlank(message = "commandType不能为空")
-    private String commandType;
+    private String userId;
 
+    private String question;
+
+    private String diagnoseType;
+
+    private String targetUri;
+
+    private String targetClass;
+
+    private String targetMethod;
 }
