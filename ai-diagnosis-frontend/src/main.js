@@ -1,28 +1,6 @@
 import anime from 'animejs/lib/anime.es.js';
 import './styles.css';
 
-const COMMANDS = [
-  { type: 'dashboard', label: 'Dashboard', hint: 'dashboard -n 1' },
-  { type: 'thread', label: 'Thread', hint: 'thread' },
-  { type: 'topThread', label: 'Top thread', hint: 'thread -n 5' },
-  { type: 'threadBlock', label: 'Thread block', hint: 'thread -b' },
-  { type: 'jvm', label: 'JVM', hint: 'jvm' },
-  { type: 'memory', label: 'Memory', hint: 'memory' }
-];
-
-const DIAGNOSE_TYPES = [
-  'HIGH_CPU',
-  'SLOW_REQUEST',
-  'THREAD_BLOCKED',
-  'MEMORY_ABNORMAL',
-  'UNKNOWN'
-];
-
-const AGENT_MODES = [
-  'TOOL_CALLING',
-  'RULE_FIRST'
-];
-
 const STREAM_EVENT_TYPES = [
   'TASK_CREATED',
   'INTENT_CLASSIFYING',
@@ -38,557 +16,695 @@ const STREAM_EVENT_TYPES = [
   'HEARTBEAT'
 ];
 
-const ACCEPTANCE_ITEMS = [
-  { id: 'agent-start-api', label: 'POST /api/agent/diagnose/start 可用' },
-  { id: 'agent-tool-mode', label: 'Agent 支持 TOOL_CALLING 模式' },
-  { id: 'sse-stream', label: 'GET /api/diagnose/tasks/{taskNo}/stream 可用' },
-  { id: 'sse-task-created', label: 'SSE 推送 TASK_CREATED' },
-  { id: 'sse-intent', label: 'SSE 推送意图识别事件' },
-  { id: 'sse-tool-start', label: 'SSE 推送 TOOL_CALL_START' },
-  { id: 'sse-tool-result', label: 'SSE 推送工具调用结果' },
-  { id: 'sse-report', label: 'SSE 推送报告生成事件' },
-  { id: 'sse-finished', label: 'SSE 推送任务完成或失败' },
-  { id: 'ai-api', label: 'POST /api/ai/diagnose 可用' },
-  { id: 'ai-intent', label: 'AI 已识别受控 diagnoseType' },
-  { id: 'ai-create-task', label: '智能诊断自动创建 diagnose_task' },
-  { id: 'ai-run-rule', label: '智能诊断复用固定规则流程' },
-  { id: 'ai-report', label: 'AI 已生成 Markdown 诊断报告' },
-  { id: 'report-schema', label: 'diagnose_report 表可用', manual: true },
-  { id: 'report-query', label: 'GET /api/ai/diagnose/{taskNo}/report 可用' },
-  { id: 'report-regenerate', label: '报告可重新生成' },
-  { id: 'schema-task', label: 'diagnose_task 表及目标字段可用', manual: true },
-  { id: 'schema-record', label: 'arthas_command_record.task_no 可用', manual: true },
-  { id: 'create-api', label: 'POST /api/diagnose/tasks 返回 taskNo' },
-  { id: 'unique-task-no', label: 'taskNo 已生成' },
-  { id: 'run-api', label: 'POST /api/diagnose/tasks/{taskNo}/run 可用' },
-  { id: 'plan-high-cpu', label: 'HIGH_CPU 执行 dashboard + thread -n 5' },
-  { id: 'plan-memory', label: 'MEMORY_ABNORMAL 执行 memory + dashboard + jvm' },
-  { id: 'plan-thread', label: 'THREAD_BLOCKED 执行 dashboard + thread + thread -b' },
-  { id: 'plan-slow', label: 'SLOW_REQUEST 执行受限 trace' },
-  { id: 'status-finished', label: '成功后任务状态 FINISHED' },
-  { id: 'status-failed', label: '失败后任务状态 FAILED 且有 error_message' },
-  { id: 'execute-task-no', label: '/api/arthas/execute 仍支持 taskNo' },
-  { id: 'record-task-no', label: '命令记录可按 taskNo 查询' },
-  { id: 'detail-task', label: '详情返回诊断任务' },
-  { id: 'detail-records', label: '详情返回命令链路和结论' },
-  { id: 'missing-task-no', label: '不存在的 taskNo 返回明确错误' },
-  { id: 'empty-task-no', label: 'taskNo 为空仍可执行单命令' }
-];
-
-const state = {
-  commandType: 'dashboard',
-  loading: false,
-  activeTaskNo: localStorage.getItem('diagnosis.activeTaskNo') || '',
-  lastResponse: null,
-  taskDetail: null,
-  reportMarkdown: '',
-  history: [],
-  sseEvents: [],
-  eventSource: null,
-  checks: new Set()
+const EVENT_LABELS = {
+  TASK_CREATED: '任务创建',
+  INTENT_CLASSIFYING: '识别意图',
+  INTENT_CLASSIFIED: '意图确认',
+  PLAN_CREATED: '计划生成',
+  TOOL_CALL_START: '工具调用',
+  TOOL_CALL_SUCCESS: '采样成功',
+  TOOL_CALL_FAILED: '采样失败',
+  AI_ANALYZING: 'AI 分析',
+  REPORT_GENERATED: '报告生成',
+  TASK_FINISHED: '诊断完成',
+  TASK_FAILED: '诊断失败',
+  HEARTBEAT: '心跳',
+  STREAM_ERROR: '连接异常',
+  MESSAGE: '消息'
 };
 
+const STAGES = [
+  {
+    id: 'entry',
+    label: '慢请求入口',
+    role: 'HTTP Evidence',
+    metric: 'P95 3.21s',
+    hint: '业务症状'
+  },
+  {
+    id: 'intent',
+    label: '意图识别',
+    role: 'AI Classifier',
+    metric: 'High CPU',
+    hint: '问题归类'
+  },
+  {
+    id: 'plan',
+    label: '诊断计划',
+    role: 'Agent Planner',
+    metric: '3 commands',
+    hint: '采样路径'
+  },
+  {
+    id: 'arthas',
+    label: 'Arthas 采样',
+    role: 'Tool Calling',
+    metric: 'thread -n 5',
+    hint: '现场证据'
+  },
+  {
+    id: 'reasoning',
+    label: '根因推理',
+    role: 'AI Analyzer',
+    metric: 'RAG Ready',
+    hint: '证据归因'
+  },
+  {
+    id: 'fix',
+    label: '修复建议',
+    role: 'Action Plan',
+    metric: '待验证',
+    hint: '回滚可控'
+  }
+];
+
+const RUNBOOK = [
+  {
+    title: '收集与理解',
+    detail: '创建诊断任务，订阅 SSE 事件流。',
+    events: ['TASK_CREATED', 'INTENT_CLASSIFYING', 'INTENT_CLASSIFIED']
+  },
+  {
+    title: '定位瓶颈',
+    detail: '生成计划，锁定 Arthas 采样命令。',
+    events: ['PLAN_CREATED']
+  },
+  {
+    title: '现场采样',
+    detail: '执行 thread、dashboard、jvm 等受控命令。',
+    events: ['TOOL_CALL_START', 'TOOL_CALL_SUCCESS', 'TOOL_CALL_FAILED']
+  },
+  {
+    title: '根因推理',
+    detail: '融合命令结果与上下文，生成分析结论。',
+    events: ['AI_ANALYZING', 'REPORT_GENERATED']
+  },
+  {
+    title: '建议与验证',
+    detail: '输出修复建议，等待人工验证。',
+    events: ['TASK_FINISHED', 'TASK_FAILED']
+  }
+];
+
+const EVENT_STAGE = {
+  TASK_CREATED: 0,
+  INTENT_CLASSIFYING: 1,
+  INTENT_CLASSIFIED: 1,
+  PLAN_CREATED: 2,
+  TOOL_CALL_START: 3,
+  TOOL_CALL_SUCCESS: 3,
+  TOOL_CALL_FAILED: 3,
+  AI_ANALYZING: 4,
+  REPORT_GENERATED: 4,
+  TASK_FINISHED: 5,
+  TASK_FAILED: 5,
+  STREAM_ERROR: 5
+};
+
+const PASSIVE_EVENT_TYPES = new Set(['HEARTBEAT']);
+
+const PRESETS = [
+  {
+    label: 'CPU 高',
+    question: '线上订单服务 CPU 持续升高，请结合 Arthas 采样定位热点线程和可疑方法。',
+    metric: 'P95 3.21s',
+    targetClass: 'com.example.order.controller.OrderController',
+    targetMethod: 'createOrder',
+    targetUri: '/api/orders'
+  },
+  {
+    label: '接口慢',
+    question: '订单查询接口响应变慢，请分析链路耗时、线程状态和可能的慢调用来源。',
+    metric: 'P95 4.08s',
+    targetClass: 'com.example.order.controller.OrderController',
+    targetMethod: 'queryOrders',
+    targetUri: '/api/orders/search'
+  },
+  {
+    label: '线程阻塞',
+    question: '支付回调偶发卡住，请检查阻塞线程、锁等待和业务调用栈。',
+    metric: 'Block 37s',
+    targetClass: 'com.example.pay.controller.CallbackController',
+    targetMethod: 'callback',
+    targetUri: '/api/pay/callback'
+  }
+];
+
+const DEMO_EVENTS = [
+  ['TASK_CREATED', 'Agent 任务已创建，开始接管现场。'],
+  ['INTENT_CLASSIFYING', '正在识别异常类型与采样目标。'],
+  ['INTENT_CLASSIFIED', '识别为高 CPU 与慢请求复合问题。'],
+  ['PLAN_CREATED', '已生成 Arthas 采样计划。'],
+  ['TOOL_CALL_START', '执行 thread -n 5 获取热点线程。'],
+  ['TOOL_CALL_SUCCESS', '热点线程集中在 OrderService#createOrder。'],
+  ['AI_ANALYZING', '正在融合线程栈、目标 URI 和历史报告。'],
+  ['REPORT_GENERATED', '已生成根因与修复建议。'],
+  ['TASK_FINISHED', '诊断完成，等待验证修复效果。']
+];
+
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const storedApiBase = localStorage.getItem('diagnosis.apiBase') || 'http://localhost:9001';
+
+const state = {
+  apiBase: localStorage.getItem('diagnosis.apiBase') || 'http://localhost:9001',
+  taskNo: localStorage.getItem('diagnosis.activeTaskNo') || '',
+  appId: 'order-service',
+  env: 'prod',
+  userId: 'admin',
+  mode: 'TOOL_CALLING',
+  question: PRESETS[0].question,
+  targetClass: PRESETS[0].targetClass,
+  targetMethod: PRESETS[0].targetMethod,
+  targetUri: PRESETS[0].targetUri,
+  symptomMetric: PRESETS[0].metric,
+  activeStage: 0,
+  completedStages: new Set(),
+  doneRunbook: new Set(),
+  activeRunbook: 0,
+  events: [],
+  commandRecords: [],
+  reportMarkdown: '',
+  lastResponse: null,
+  eventSource: null,
+  demoTimer: null,
+  loading: false,
+  connection: 'READY'
+};
 
 document.querySelector('#app').innerHTML = `
-  <main class="shell">
-    <header class="topbar reveal">
-      <a class="brand" href="/" aria-label="AI Diagnosis Console 首页">
-        <span class="brand-mark" aria-hidden="true">A</span>
-        <span>AI Diagnosis</span>
-      </a>
-      <div class="service-state" aria-live="polite">
-        <span class="state-dot" data-state-dot></span>
-        <span data-service-state>等待验收</span>
+  <div class="diagnosis-studio">
+    <aside class="side-rail" aria-label="主导航">
+      <a class="mark" href="/" aria-label="AI Arthas Diagnosis">A</a>
+      <nav class="rail-nav">
+        <button class="rail-button is-active" type="button" data-jump="map" aria-label="因果图谱">图</button>
+        <button class="rail-button" type="button" data-jump="stream" aria-label="事件流">流</button>
+        <button class="rail-button" type="button" data-jump="report" aria-label="诊断报告">报</button>
+      </nav>
+      <div class="rail-bottom">
+        <span class="rail-state" data-connection-dot></span>
+        <button class="rail-button" type="button" data-stop-stream aria-label="停止流">停</button>
       </div>
-    </header>
+    </aside>
 
-    <section class="workspace acceptance-workspace">
-      <section class="control-panel task-panel reveal" aria-labelledby="task-title">
-        <div class="panel-heading compact-heading">
-          <p class="panel-kicker">Phase 5 / 6</p>
-          <h1 id="task-title">智能诊断验收</h1>
+    <div class="workspace">
+      <header class="topbar reveal">
+        <div class="title-block">
+          <span>AI + Arthas</span>
+          <h1>性能因果图谱</h1>
+          <p>Causal Map Studio</p>
         </div>
 
-        <form id="task-form" class="diagnosis-form">
-          <div class="field">
-            <label for="apiBase">后端地址</label>
-            <input id="apiBase" name="apiBase" value="${escapeHtml(storedApiBase)}" autocomplete="url" />
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label for="appId">App ID</label>
-              <input id="appId" name="appId" value="order-service" autocomplete="off" />
-            </div>
-            <div class="field compact">
-              <label for="env">环境</label>
-              <input id="env" name="env" value="test" autocomplete="off" />
-            </div>
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label for="userId">用户</label>
-              <input id="userId" name="userId" value="admin" autocomplete="off" />
-            </div>
-            <div class="field compact">
-              <label for="diagnoseType">诊断类型</label>
-              <select id="diagnoseType" name="diagnoseType">
-                ${DIAGNOSE_TYPES.map((type) => `<option value="${type}">${type}</option>`).join('')}
-              </select>
-            </div>
-          </div>
-          <div class="field">
-            <label for="mode">Agent 模式</label>
-            <select id="mode" name="mode">
-              ${AGENT_MODES.map((mode) => `<option value="${mode}">${mode}</option>`).join('')}
-            </select>
-          </div>
-          <div class="field">
-            <label for="question">问题</label>
-            <textarea id="question" name="question" rows="3">CPU 很高，帮我分析一下</textarea>
-          </div>
-          <div class="field">
-            <label for="targetUri">目标 URI</label>
-            <input id="targetUri" name="targetUri" placeholder="/api/order/create" autocomplete="off" />
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label for="targetClass">目标类</label>
-              <input id="targetClass" name="targetClass" value="com.example.order.controller.OrderController" autocomplete="off" />
-            </div>
-            <div class="field">
-              <label for="targetMethod">目标方法</label>
-              <input id="targetMethod" name="targetMethod" value="createOrder" autocomplete="off" />
-            </div>
-          </div>
-          <div class="action-row">
-            <button class="primary-button" type="button" data-agent-diagnose-button>Agent 实时诊断</button>
-            <button class="primary-button" type="button" data-ai-diagnose-button>AI 智能诊断</button>
-            <button class="primary-button" type="submit" data-create-button>创建任务</button>
-            <button class="primary-button" type="button" data-run-button>执行规则诊断</button>
-            <button class="secondary-button" type="button" data-refresh-button>查询详情</button>
-            <button class="secondary-button" type="button" data-report-button>查询报告</button>
-            <button class="secondary-button" type="button" data-regenerate-report-button>重生成报告</button>
-            <button class="secondary-button" type="button" data-finish-button>标记完成</button>
-          </div>
-        </form>
-      </section>
+        <div class="top-fields">
+          <label>
+            <span>服务</span>
+            <input id="appId" value="${escapeHtml(state.appId)}" autocomplete="off" />
+          </label>
+          <label>
+            <span>环境</span>
+            <input id="env" value="${escapeHtml(state.env)}" autocomplete="off" />
+          </label>
+          <label class="backend-field">
+            <span>Backend</span>
+            <input id="apiBase" value="${escapeHtml(state.apiBase)}" autocomplete="url" />
+          </label>
+        </div>
 
-      <section class="visual-panel command-panel reveal" aria-labelledby="command-title">
-        <div class="section-head">
+        <div class="session-strip" aria-live="polite">
           <div>
-            <p class="panel-kicker">Command audit</p>
-            <h2 id="command-title">命令归属</h2>
+            <small>会话进度</small>
+            <strong data-progress-label>0 / ${STAGES.length}</strong>
           </div>
-          <span class="status-pill" data-active-task-pill>${state.activeTaskNo ? escapeHtml(state.activeTaskNo) : '未创建'}</span>
-        </div>
-
-        <div class="field">
-          <label for="taskNo">当前 taskNo</label>
-          <input id="taskNo" name="taskNo" value="${escapeHtml(state.activeTaskNo)}" autocomplete="off" placeholder="创建任务后自动填入" />
-        </div>
-
-        <fieldset class="command-field">
-          <legend>命令类型</legend>
-          <div class="command-grid" data-command-grid>
-            ${COMMANDS.map((command) => `
-              <button
-                class="command-button ${command.type === state.commandType ? 'is-active' : ''}"
-                type="button"
-                data-command="${command.type}"
-                aria-pressed="${command.type === state.commandType}"
-              >
-                <span>${command.label}</span>
-                <small>${command.hint}</small>
-              </button>
-            `).join('')}
+          <div class="progress-track" aria-hidden="true">
+            <span data-progress-bar></span>
           </div>
-        </fieldset>
-
-        <div class="action-row">
-          <button class="primary-button" type="button" data-execute-task-button>带 taskNo 执行</button>
-          <button class="secondary-button" type="button" data-execute-free-button>不带 taskNo</button>
-          <button class="danger-button" type="button" data-missing-task-button>测试不存在 taskNo</button>
+          <div>
+            <small>当前任务</small>
+            <strong data-task-label>${escapeHtml(state.taskNo || '未创建')}</strong>
+          </div>
         </div>
+      </header>
 
-        <div class="stream-panel" aria-live="polite">
-          <div class="stream-head">
+      <main class="studio-grid">
+        <section id="map" class="map-panel reveal" aria-labelledby="map-title">
+          <div class="map-toolbar">
             <div>
-              <p class="panel-kicker">Live stream</p>
-              <h2>实时事件</h2>
+              <p class="panel-label">诊断现场</p>
+              <h2 id="map-title">从症状到根因的实时路径</h2>
             </div>
-            <div class="stream-actions">
-              <span class="status-pill" data-stream-count>0 条</span>
-              <button class="text-button" type="button" data-disconnect-stream-button disabled>断开</button>
+            <div class="toolbar-actions">
+              <button class="primary-button" type="button" data-start-agent>启动诊断</button>
+              <button class="secondary-button" type="button" data-quick-ai>AI 快速分析</button>
+              <button class="ghost-button" type="button" data-demo-flow>演示流</button>
             </div>
           </div>
-          <div class="stream-list" data-stream-list>
-            <p class="subtle">启动 Agent 实时诊断后，这里会显示 SSE 事件。</p>
-          </div>
-        </div>
-      </section>
 
-      <section class="detail-panel reveal" aria-labelledby="detail-title">
-        <div class="section-head">
+          <div class="incident-card">
+            <div class="incident-copy">
+              <span>异常描述</span>
+              <textarea id="question" rows="3">${escapeHtml(state.question)}</textarea>
+            </div>
+            <div class="preset-row">
+              ${PRESETS.map((preset, index) => `
+                <button class="preset-button ${index === 0 ? 'is-active' : ''}" type="button" data-preset="${index}">
+                  <strong>${escapeHtml(preset.label)}</strong>
+                  <span>${escapeHtml(preset.metric)}</span>
+                </button>
+              `).join('')}
+            </div>
+            <details class="target-details">
+              <summary>目标范围</summary>
+              <div class="target-grid">
+                <label>
+                  <span>URI</span>
+                  <input id="targetUri" value="${escapeHtml(state.targetUri)}" autocomplete="off" />
+                </label>
+                <label>
+                  <span>Class</span>
+                  <input id="targetClass" value="${escapeHtml(state.targetClass)}" autocomplete="off" />
+                </label>
+                <label>
+                  <span>Method</span>
+                  <input id="targetMethod" value="${escapeHtml(state.targetMethod)}" autocomplete="off" />
+                </label>
+              </div>
+            </details>
+          </div>
+
+          <div class="graph-wrap" aria-label="因果图谱">
+            <div class="graph-legend">
+              <span><i class="legend-dot java"></i>Java 层</span>
+              <span><i class="legend-dot arthas"></i>Arthas 采样</span>
+              <span><i class="legend-dot ai"></i>AI 推理</span>
+              <span><i class="legend-dot done"></i>已验证</span>
+            </div>
+            <div class="cause-map" data-cause-map>
+              ${STAGES.map((stage, index) => `
+                <article class="flow-node ${index === 0 ? 'is-active' : ''}" data-stage="${index}" data-stage-id="${stage.id}">
+                  <div class="evidence-tag">
+                    <span>Evidence</span>
+                    <strong data-stage-metric="${index}">${escapeHtml(stage.metric)}</strong>
+                  </div>
+                  <div class="node-shell">
+                    <small>${escapeHtml(stage.role)}</small>
+                    <h3>${escapeHtml(stage.label)}</h3>
+                    <p>${escapeHtml(stage.hint)}</p>
+                  </div>
+                  ${index < STAGES.length - 1 ? `<span class="flow-edge" data-edge="${index}"></span>` : ''}
+                </article>
+              `).join('')}
+            </div>
+          </div>
+        </section>
+
+        <aside class="insight-panel reveal" aria-label="根因与建议">
+          <section class="insight-card root-card">
+            <div class="insight-heading">
+              <p class="panel-label">根因与建议</p>
+              <span data-status-pill>Ready</span>
+            </div>
+            <div class="root-orb" aria-hidden="true"></div>
+            <h2 data-root-title>等待诊断事件</h2>
+            <p data-root-copy>启动 Agent 后，SSE 事件会推动图谱节点、计划步骤和报告区域同步更新。</p>
+          </section>
+
+          <section id="stream" class="insight-card stream-card">
+            <div class="insight-heading">
+              <h3>流式事件</h3>
+              <span data-event-count>0 events</span>
+            </div>
+            <div class="stream-list" data-stream-list></div>
+          </section>
+
+          <section id="report" class="insight-card report-card">
+            <div class="insight-heading">
+              <h3>AI 报告</h3>
+              <button class="text-button" type="button" data-refresh-detail>刷新</button>
+            </div>
+            <article class="report-body" data-report-body></article>
+          </section>
+        </aside>
+      </main>
+
+      <section class="agent-plan reveal" aria-label="智能体执行计划">
+        <div class="plan-head">
           <div>
-            <p class="panel-kicker">Task detail</p>
-            <h2 id="detail-title">任务详情</h2>
+            <p class="panel-label">智能体执行计划</p>
+            <h2>Agent runbook</h2>
           </div>
-          <button class="text-button" type="button" data-copy-task-button disabled>复制 taskNo</button>
+          <div class="plan-meta">
+            <span data-mode-label>${escapeHtml(state.mode)}</span>
+            <span data-cost-label>等待启动</span>
+          </div>
         </div>
-        <div class="detail-body" data-detail-body>
-          ${renderEmptyDetail()}
+        <div class="plan-track" data-plan-track>
+          ${RUNBOOK.map((step, index) => `
+            <article class="plan-step ${index === 0 ? 'is-active' : ''}" data-runbook="${index}">
+              <span>${index + 1}</span>
+              <strong>${escapeHtml(step.title)}</strong>
+              <p>${escapeHtml(step.detail)}</p>
+            </article>
+          `).join('')}
         </div>
       </section>
-
-      <section class="result-panel reveal" aria-labelledby="result-title">
-        <div class="result-head">
-          <div>
-            <p class="panel-kicker">Last response</p>
-            <h2 id="result-title">接口响应</h2>
-          </div>
-          <button class="text-button" type="button" data-copy-button disabled>复制 JSON</button>
-        </div>
-        <div class="result-body" data-result-body>
-          <div class="empty-state">
-            <span class="empty-line"></span>
-            <p>执行验收动作后，响应会显示在这里。</p>
-          </div>
-        </div>
-      </section>
-
-      <aside class="history-panel checklist-panel reveal" aria-labelledby="checklist-title">
-        <div class="section-head">
-          <h2 id="checklist-title">验收项</h2>
-          <span class="status-pill" data-check-count>0/${ACCEPTANCE_ITEMS.length}</span>
-        </div>
-        <div data-checklist class="check-list"></div>
-        <div class="history-divider"></div>
-        <h2 class="history-title">最近动作</h2>
-        <div data-history-list class="history-list">
-          <p class="subtle">暂无记录</p>
-        </div>
-      </aside>
-    </section>
-  </main>
+    </div>
+  </div>
 `;
 
-const taskForm = document.querySelector('#task-form');
-const taskNoInput = document.querySelector('#taskNo');
-const commandButtons = Array.from(document.querySelectorAll('[data-command]'));
-const agentDiagnoseButton = document.querySelector('[data-agent-diagnose-button]');
-const aiDiagnoseButton = document.querySelector('[data-ai-diagnose-button]');
-const createButton = document.querySelector('[data-create-button]');
-const runButton = document.querySelector('[data-run-button]');
-const refreshButton = document.querySelector('[data-refresh-button]');
-const reportButton = document.querySelector('[data-report-button]');
-const regenerateReportButton = document.querySelector('[data-regenerate-report-button]');
-const finishButton = document.querySelector('[data-finish-button]');
-const executeTaskButton = document.querySelector('[data-execute-task-button]');
-const executeFreeButton = document.querySelector('[data-execute-free-button]');
-const missingTaskButton = document.querySelector('[data-missing-task-button]');
-const copyButton = document.querySelector('[data-copy-button]');
-const copyTaskButton = document.querySelector('[data-copy-task-button]');
-const disconnectStreamButton = document.querySelector('[data-disconnect-stream-button]');
+const refs = {
+  apiBase: document.querySelector('#apiBase'),
+  appId: document.querySelector('#appId'),
+  env: document.querySelector('#env'),
+  question: document.querySelector('#question'),
+  targetUri: document.querySelector('#targetUri'),
+  targetClass: document.querySelector('#targetClass'),
+  targetMethod: document.querySelector('#targetMethod'),
+  startAgent: document.querySelector('[data-start-agent]'),
+  quickAi: document.querySelector('[data-quick-ai]'),
+  demoFlow: document.querySelector('[data-demo-flow]'),
+  stopStream: document.querySelector('[data-stop-stream]'),
+  refreshDetail: document.querySelector('[data-refresh-detail]')
+};
 
-renderChecklist();
+bindEvents();
+renderAll();
 runIntroAnimation();
 
-commandButtons.forEach((button) => {
-  button.addEventListener('click', () => {
-    setCommand(button.dataset.command);
-    animateButton(button);
+function bindEvents() {
+  document.querySelectorAll('[data-jump]').forEach((button) => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('[data-jump]').forEach((item) => item.classList.toggle('is-active', item === button));
+      document.getElementById(button.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   });
-});
 
-taskForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  await createTask();
-});
+  document.querySelectorAll('[data-preset]').forEach((button) => {
+    button.addEventListener('click', () => applyPreset(Number(button.dataset.preset), button));
+  });
 
-agentDiagnoseButton.addEventListener('click', () => runAgentDiagnosis());
-aiDiagnoseButton.addEventListener('click', () => runAiDiagnosis());
-refreshButton.addEventListener('click', () => refreshDetail());
-reportButton.addEventListener('click', () => queryReport());
-regenerateReportButton.addEventListener('click', () => regenerateReport());
-runButton.addEventListener('click', () => runDiagnosis());
-finishButton.addEventListener('click', () => finishTask());
-executeTaskButton.addEventListener('click', () => executeCommand({ mode: 'task' }));
-executeFreeButton.addEventListener('click', () => executeCommand({ mode: 'free' }));
-missingTaskButton.addEventListener('click', () => executeCommand({ mode: 'missing' }));
-disconnectStreamButton.addEventListener('click', () => closeEventStream(true));
+  [refs.apiBase, refs.appId, refs.env, refs.question, refs.targetUri, refs.targetClass, refs.targetMethod].forEach((input) => {
+    input.addEventListener('change', readInputs);
+  });
 
-taskNoInput.addEventListener('input', () => {
-  setActiveTaskNo(taskNoInput.value.trim(), false);
-});
+  refs.startAgent.addEventListener('click', startAgentDiagnosis);
+  refs.quickAi.addEventListener('click', runQuickAi);
+  refs.demoFlow.addEventListener('click', playDemoFlow);
+  refs.stopStream.addEventListener('click', () => closeLiveSources(true));
+  refs.refreshDetail.addEventListener('click', () => refreshReport());
+}
 
-copyButton.addEventListener('click', async () => {
-  if (!state.lastResponse) return;
-  await navigator.clipboard.writeText(JSON.stringify(state.lastResponse, null, 2));
-  flashButton(copyButton, '已复制', '复制 JSON');
-});
+function applyPreset(index, button) {
+  const preset = PRESETS[index] || PRESETS[0];
+  state.question = preset.question;
+  state.targetClass = preset.targetClass;
+  state.targetMethod = preset.targetMethod;
+  state.targetUri = preset.targetUri;
+  state.symptomMetric = preset.metric;
 
-copyTaskButton.addEventListener('click', async () => {
-  if (!state.activeTaskNo) return;
-  await navigator.clipboard.writeText(state.activeTaskNo);
-  flashButton(copyTaskButton, '已复制', '复制 taskNo');
-});
+  refs.question.value = state.question;
+  refs.targetClass.value = state.targetClass;
+  refs.targetMethod.value = state.targetMethod;
+  refs.targetUri.value = state.targetUri;
 
-async function runAgentDiagnosis() {
-  const values = getFormValues();
-  closeEventStream(false);
-  resetStreamEvents();
+  document.querySelectorAll('[data-preset]').forEach((item) => item.classList.toggle('is-active', item === button));
+  document.querySelector('[data-stage-metric="0"]').textContent = preset.metric;
+  animatePress(button);
+}
 
-  await runAction('Agent 实时诊断', async () => {
-    const response = await requestJson(`${values.apiBase}/api/agent/diagnose/start`, {
+function readInputs() {
+  state.apiBase = normalizeApiBase(refs.apiBase.value);
+  state.appId = refs.appId.value.trim() || 'order-service';
+  state.env = refs.env.value.trim() || 'prod';
+  state.question = refs.question.value.trim();
+  state.targetUri = refs.targetUri.value.trim();
+  state.targetClass = refs.targetClass.value.trim();
+  state.targetMethod = refs.targetMethod.value.trim();
+  refs.apiBase.value = state.apiBase;
+  localStorage.setItem('diagnosis.apiBase', state.apiBase);
+}
+
+async function startAgentDiagnosis() {
+  readInputs();
+  resetRun();
+
+  await runAction('启动诊断', async () => {
+    const response = await requestJson(`${state.apiBase}/api/agent/diagnose/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        appId: values.appId,
-        env: values.env,
-        userId: values.userId,
-        question: values.question,
-        targetUri: values.targetUri,
-        targetClass: values.targetClass,
-        targetMethod: values.targetMethod,
-        mode: values.mode
+        appId: state.appId,
+        env: state.env,
+        userId: state.userId,
+        question: state.question,
+        targetUri: state.targetUri,
+        targetClass: state.targetClass,
+        targetMethod: state.targetMethod,
+        mode: state.mode
       })
     });
-    setActiveTaskNo(response.taskNo, true);
-    markChecks(['agent-start-api', 'schema-task']);
-    if (values.mode === 'TOOL_CALLING') {
-      markChecks(['agent-tool-mode']);
+
+    setTaskNo(response.taskNo);
+    pushEvent({
+      taskNo: response.taskNo,
+      eventType: 'TASK_CREATED',
+      message: '诊断任务已创建，正在等待 Agent 事件流。',
+      success: true,
+      time: new Date().toISOString()
+    });
+    connectStream(response.streamUrl);
+    renderResponse(response);
+    return response;
+  });
+}
+
+async function runQuickAi() {
+  readInputs();
+
+  await runAction('AI 快速分析', async () => {
+    const response = await requestJson(`${state.apiBase}/api/ai/diagnose`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        appId: state.appId,
+        env: state.env,
+        userId: state.userId,
+        question: state.question,
+        targetUri: state.targetUri,
+        targetClass: state.targetClass,
+        targetMethod: state.targetMethod
+      })
+    });
+
+    setTaskNo(response.taskNo);
+    state.reportMarkdown = response.reportMarkdown || '';
+    pushEvent({ eventType: 'TASK_CREATED', message: 'AI 快速诊断任务已创建。', success: true });
+    pushEvent({ eventType: 'REPORT_GENERATED', message: 'AI 诊断报告已返回。', success: true, data: response });
+    renderResponse(response);
+    renderReport();
+    return response;
+  });
+}
+
+function playDemoFlow() {
+  closeLiveSources(false);
+  resetRun();
+  setTaskNo(`DEMO-${new Date().toISOString().slice(11, 19).replaceAll(':', '')}`);
+  setConnection('RUNNING', '演示流运行中');
+
+  let index = 0;
+  state.demoTimer = window.setInterval(() => {
+    const current = DEMO_EVENTS[index];
+    if (!current) {
+      closeLiveSources(false);
+      setConnection('SUCCESS', '演示完成');
+      return;
     }
-    renderResponse(response, 'Agent 已启动');
-    connectDiagnoseStream(values.apiBase, response.taskNo);
-    return response;
-  });
-}
 
-async function runAiDiagnosis() {
-  const values = getFormValues();
-  await runAction('AI 智能诊断', async () => {
-    const response = await requestJson(`${values.apiBase}/api/ai/diagnose`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        appId: values.appId,
-        env: values.env,
-        userId: values.userId,
-        question: values.question,
-        targetUri: values.targetUri,
-        targetClass: values.targetClass,
-        targetMethod: values.targetMethod
-      })
+    pushEvent({
+      taskNo: state.taskNo,
+      eventType: current[0],
+      message: current[1],
+      command: current[0] === 'TOOL_CALL_SUCCESS' ? 'thread -n 5' : '',
+      toolName: current[0].startsWith('TOOL') ? 'Arthas' : '',
+      success: !current[0].includes('FAILED'),
+      time: new Date().toISOString(),
+      data: current[0] === 'REPORT_GENERATED'
+        ? { reportMarkdown: demoReport() }
+        : null
     });
-    setActiveTaskNo(response.taskNo, true);
-    markAiChecks(response);
-    renderReportResponse(response, response.status === 'FINISHED' ? '智能诊断完成' : '智能诊断失败');
-    await refreshDetail({ silent: true });
-    return response;
-  });
+    index += 1;
+  }, 720);
 }
 
-async function createTask() {
-  const values = getFormValues();
-  await runAction('创建任务', async () => {
-    const response = await requestJson(`${values.apiBase}/api/diagnose/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        appId: values.appId,
-        env: values.env,
-        userId: values.userId,
-        question: values.question,
-        diagnoseType: values.diagnoseType,
-        targetUri: values.targetUri,
-        targetClass: values.targetClass,
-        targetMethod: values.targetMethod
-      })
+function connectStream(streamUrl) {
+  if (!state.taskNo) return;
+
+  const url = resolveStreamUrl(streamUrl);
+  const source = new EventSource(url);
+  state.eventSource = source;
+  setConnection('RUNNING', 'SSE 已连接');
+
+  STREAM_EVENT_TYPES.forEach((eventType) => {
+    source.addEventListener(eventType, (event) => handleSseEvent(eventType, event));
+  });
+
+  source.onmessage = (event) => handleSseEvent('MESSAGE', event);
+  source.onerror = () => {
+    if (state.eventSource !== source) return;
+    pushEvent({
+      eventType: 'STREAM_ERROR',
+      message: 'SSE 连接异常或已关闭。',
+      success: false,
+      time: new Date().toISOString()
     });
-    setActiveTaskNo(response.taskNo, true);
-    markChecks(['create-api', 'unique-task-no', 'schema-task']);
-    renderResponse(response, '创建成功');
-    await refreshDetail({ silent: true });
-    return response;
-  });
+    closeLiveSources(false);
+    setConnection('ERROR', 'SSE 已断开');
+  };
 }
 
-async function runDiagnosis() {
-  const taskNo = taskNoInput.value.trim();
-  const values = getFormValues();
-  if (!taskNo) {
-    renderResponse({ message: '请先创建或填写 taskNo' }, '缺少 taskNo');
+function handleSseEvent(eventType, event) {
+  const payload = safeJsonParse(event.data || '{}');
+  const eventPayload = {
+    ...payload,
+    eventType: payload.eventType || eventType,
+    time: payload.time || new Date().toISOString()
+  };
+
+  if (PASSIVE_EVENT_TYPES.has(eventPayload.eventType)) {
+    setConnection('RUNNING', 'SSE 已连接');
     return;
   }
 
-  await runAction('执行规则诊断', async () => {
-    const response = await requestJson(`${values.apiBase}/api/diagnose/tasks/${encodeURIComponent(taskNo)}/run`, {
-      method: 'POST'
-    });
-    markRunChecks(values.diagnoseType, response);
-    renderResponse(response, response.status === 'FINISHED' ? '诊断完成' : '诊断失败');
-    await refreshDetail({ silent: true });
-    return response;
-  });
+  pushEvent(eventPayload);
+
+  if (eventPayload.eventType === 'REPORT_GENERATED') {
+    state.reportMarkdown = extractReportMarkdown(eventPayload.data) || state.reportMarkdown;
+    renderReport();
+  }
+
+  if (eventPayload.eventType === 'TASK_FINISHED') {
+    closeLiveSources(false);
+    setConnection('SUCCESS', '诊断完成');
+    refreshTaskDetail({ silent: true });
+  }
+
+  if (eventPayload.eventType === 'TASK_FAILED') {
+    closeLiveSources(false);
+    setConnection('ERROR', '诊断失败');
+    refreshTaskDetail({ silent: true });
+  }
 }
 
-async function executeCommand({ mode }) {
-  const values = getFormValues();
-  const commandType = state.commandType;
-  const taskNo = mode === 'missing' ? 'DIAG-NOT-FOUND' : taskNoInput.value.trim();
-  const label = mode === 'free'
-    ? '不带 taskNo 执行'
-    : mode === 'missing'
-      ? '不存在 taskNo'
-      : '带 taskNo 执行';
+function pushEvent(event) {
+  const normalized = {
+    taskNo: event.taskNo || state.taskNo,
+    eventType: event.eventType || 'MESSAGE',
+    message: event.message || '',
+    command: event.command || '',
+    toolName: event.toolName || '',
+    success: event.success,
+    data: event.data,
+    time: event.time || new Date().toISOString()
+  };
 
-  await runAction(label, async () => {
-    const payload = {
-      appId: values.appId,
-      env: values.env,
-      commandType
-    };
+  const stage = EVENT_STAGE[normalized.eventType];
+  const previousStage = state.activeStage;
+  let stageChanged = false;
 
-    if (mode !== 'free') {
-      payload.taskNo = taskNo;
+  if (Number.isInteger(stage)) {
+    state.activeStage = Math.max(state.activeStage, stage);
+    stageChanged = state.activeStage !== previousStage;
+
+    for (let index = 0; index < state.activeStage; index += 1) {
+      state.completedStages.add(index);
     }
 
-    try {
-      const response = await requestJson(`${values.apiBase}/api/arthas/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (mode === 'task') {
-        markChecks(['execute-task-no', 'schema-record']);
-        await refreshDetail({ silent: true });
-      }
-      if (mode === 'free') {
-        markChecks(['empty-task-no']);
-      }
-      renderResponse(response, response.success ? '命令完成' : '命令失败');
-      return response;
-    } catch (error) {
-      const failure = {
-        code: error.code || 'REQUEST_ERROR',
-        message: error.message,
-        taskNo: payload.taskNo,
-        commandType
-      };
-      if (mode === 'missing' && error.message.includes('诊断任务不存在')) {
-        markChecks(['missing-task-no']);
-      }
-      renderResponse(failure, '请求失败');
-      return failure;
+    if (normalized.eventType === 'TASK_FINISHED') {
+      STAGES.forEach((_, index) => state.completedStages.add(index));
+      state.activeStage = STAGES.length - 1;
     }
-  });
+  }
+
+  const runbookIndex = RUNBOOK.findIndex((item) => item.events.includes(normalized.eventType));
+  const previousRunbook = state.activeRunbook;
+
+  if (runbookIndex >= 0) {
+    state.activeRunbook = Math.max(state.activeRunbook, runbookIndex);
+
+    for (let doneIndex = 0; doneIndex < state.activeRunbook; doneIndex += 1) {
+      state.doneRunbook.add(doneIndex);
+    }
+
+    if (normalized.eventType === 'TASK_FINISHED') {
+      RUNBOOK.forEach((_, index) => state.doneRunbook.add(index));
+      state.activeRunbook = RUNBOOK.length - 1;
+    }
+  }
+
+  if (normalized.eventType === 'REPORT_GENERATED') {
+    state.reportMarkdown = extractReportMarkdown(normalized.data) || state.reportMarkdown;
+    renderReport();
+  }
+
+  state.events = [normalized, ...state.events].slice(0, 18);
+  renderEventDrivenState();
+  animateEvent(Number.isInteger(stage) && stageChanged ? state.activeStage : null, previousRunbook !== state.activeRunbook);
 }
 
-async function refreshDetail(options = {}) {
-  const taskNo = taskNoInput.value.trim();
-  const values = getFormValues();
-  if (!taskNo) {
-    renderResponse({ message: '请先创建或填写 taskNo' }, '缺少 taskNo');
+async function refreshTaskDetail(options = {}) {
+  if (!state.taskNo) {
+    showNotice('先启动诊断或填写任务号。');
     return null;
   }
 
   const action = async () => {
-    const response = await requestJson(`${values.apiBase}/api/diagnose/tasks/${encodeURIComponent(taskNo)}/detail`);
-    state.taskDetail = response;
-    renderTaskDetail(response);
-    const records = response.commandRecords || [];
-    markChecks(['detail-task']);
-    if (records.length > 0) {
-      markChecks(['detail-records', 'record-task-no']);
-    }
-    if (!options.silent) {
-      renderResponse(response, '详情已更新');
-    }
-    return response;
+    const detail = await requestJson(`${state.apiBase}/api/diagnose/tasks/${encodeURIComponent(state.taskNo)}/detail`);
+    state.commandRecords = detail.commandRecords || [];
+    renderResponse(detail);
+    return detail;
   };
 
-  return options.silent ? action() : runAction('查询详情', action);
+  if (options.silent) {
+    try {
+      return await action();
+    } catch {
+      return null;
+    }
+  }
+
+  return runAction('刷新详情', action);
 }
 
-async function queryReport() {
-  const taskNo = taskNoInput.value.trim();
-  const values = getFormValues();
-  if (!taskNo) {
-    renderResponse({ message: '请先创建或填写 taskNo' }, '缺少 taskNo');
+async function refreshReport() {
+  if (!state.taskNo) {
+    showNotice('先启动诊断或填写任务号。');
     return null;
   }
 
-  await runAction('查询报告', async () => {
-    const response = await requestJson(`${values.apiBase}/api/ai/diagnose/${encodeURIComponent(taskNo)}/report`);
-    markChecks(['report-query', 'report-schema']);
-    renderReportResponse(response, '报告已加载');
-    return response;
-  });
-}
-
-async function regenerateReport() {
-  const taskNo = taskNoInput.value.trim();
-  const values = getFormValues();
-  if (!taskNo) {
-    renderResponse({ message: '请先创建或填写 taskNo' }, '缺少 taskNo');
-    return null;
-  }
-
-  await runAction('重生成报告', async () => {
-    const response = await requestJson(`${values.apiBase}/api/ai/diagnose/${encodeURIComponent(taskNo)}/report/regenerate`, {
-      method: 'POST'
-    });
-    markChecks(['report-regenerate', 'ai-report', 'report-schema']);
-    renderReportResponse(response, '报告已重生成');
-    return response;
-  });
-}
-
-async function finishTask() {
-  const taskNo = taskNoInput.value.trim();
-  const values = getFormValues();
-  if (!taskNo) {
-    renderResponse({ message: '请先创建或填写 taskNo' }, '缺少 taskNo');
-    return;
-  }
-
-  await runAction('标记完成', async () => {
-    const response = await requestJson(`${values.apiBase}/api/diagnose/tasks/${encodeURIComponent(taskNo)}/finish`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conclusion: '已完成第三阶段前端验收采集'
-      })
-    });
-    renderResponse(response || { status: 'FINISHED' }, '已完成');
-    await refreshDetail({ silent: true });
-    return response || { status: 'FINISHED' };
+  return runAction('刷新报告', async () => {
+    const report = await requestJson(`${state.apiBase}/api/ai/diagnose/${encodeURIComponent(state.taskNo)}/report`);
+    state.reportMarkdown = report.reportMarkdown || '';
+    renderReport();
+    renderResponse(report);
+    return report;
   });
 }
 
 async function runAction(label, action) {
   if (state.loading) return null;
+
   setLoading(true, label);
-  renderLoading();
-  animateSignal();
   try {
     const response = await action();
-    pushHistory(label, true);
-    setServiceState('success', `${label}成功`);
+    setConnection(state.eventSource || state.demoTimer ? 'RUNNING' : 'SUCCESS', `${label}成功`);
     return response;
   } catch (error) {
-    const failure = {
+    const payload = {
       code: error.code || 'REQUEST_ERROR',
-      message: error.message
+      message: error.message || String(error)
     };
-    state.lastResponse = failure;
-    pushHistory(label, false);
-    renderResponse(failure, '请求失败');
-    setServiceState('error', `${label}失败`);
-    return failure;
+    renderResponse(payload);
+    showNotice(payload.message);
+    setConnection('ERROR', `${label}失败`);
+    return null;
   } finally {
     setLoading(false);
   }
@@ -597,13 +713,221 @@ async function runAction(label, action) {
 async function requestJson(url, options) {
   const response = await fetch(url, options);
   const text = await response.text();
-  const payload = text ? safeJsonParse(text) : null;
+  const payload = text ? safeJsonParse(text) : {};
+
   if (!response.ok) {
-    const error = new Error(payload?.message || `HTTP ${response.status}`);
-    error.code = payload?.code;
+    const error = new Error(payload.message || `HTTP ${response.status}`);
+    error.code = payload.code;
     throw error;
   }
-  return payload || {};
+
+  return payload;
+}
+
+function renderAll() {
+  renderEventDrivenState();
+  renderReport();
+  renderResponse(null);
+}
+
+function renderEventDrivenState() {
+  renderMapState();
+  renderRunbook();
+  renderTimeline();
+  renderRootCard();
+  renderProgress();
+}
+
+function renderMapState() {
+  document.querySelectorAll('[data-stage]').forEach((node) => {
+    const index = Number(node.dataset.stage);
+    node.classList.toggle('is-active', index === state.activeStage);
+    node.classList.toggle('is-done', state.completedStages.has(index));
+    node.classList.toggle('is-error', state.events[0]?.eventType === 'TASK_FAILED' && index === state.activeStage);
+  });
+
+  document.querySelectorAll('[data-edge]').forEach((edge) => {
+    const index = Number(edge.dataset.edge);
+    edge.classList.toggle('is-hot', index < state.activeStage);
+  });
+}
+
+function renderRunbook() {
+  document.querySelectorAll('[data-runbook]').forEach((step) => {
+    const index = Number(step.dataset.runbook);
+    step.classList.toggle('is-active', index === state.activeRunbook);
+    step.classList.toggle('is-done', state.doneRunbook.has(index));
+  });
+}
+
+function renderTimeline() {
+  const target = document.querySelector('[data-stream-list]');
+  document.querySelector('[data-event-count]').textContent = `${state.events.length} events`;
+
+  if (!state.events.length) {
+    target.innerHTML = `
+      <div class="empty-state">
+        <strong>等待 SSE</strong>
+        <span>启动诊断后，事件会像电流一样推进图谱。</span>
+      </div>
+    `;
+    return;
+  }
+
+  target.innerHTML = state.events.map((event) => {
+    const label = EVENT_LABELS[event.eventType] || event.eventType;
+    const command = [event.toolName, event.command].filter(Boolean).join(' / ');
+    const tone = event.success === false ? 'is-bad' : event.success === true ? 'is-good' : '';
+
+    return `
+      <article class="stream-item ${tone}">
+        <div>
+          <strong>${escapeHtml(label)}</strong>
+          <time>${escapeHtml(formatTime(event.time))}</time>
+        </div>
+        <p>${escapeHtml(event.message || command || '收到事件。')}</p>
+        ${command ? `<small>${escapeHtml(command)}</small>` : ''}
+      </article>
+    `;
+  }).join('');
+}
+
+function renderRootCard() {
+  const latest = state.events[0];
+  const statusText = state.connection === 'RUNNING'
+    ? '分析中'
+    : state.connection === 'SUCCESS'
+      ? '已完成'
+      : state.connection === 'ERROR'
+        ? '需检查'
+        : 'Ready';
+
+  document.querySelector('[data-status-pill]').textContent = statusText;
+
+  if (!latest) {
+    document.querySelector('[data-root-title]').textContent = '等待诊断事件';
+    document.querySelector('[data-root-copy]').textContent = '启动 Agent 后，SSE 事件会推动图谱节点、计划步骤和报告区域同步更新。';
+    return;
+  }
+
+  if (latest.eventType === 'TOOL_CALL_SUCCESS') {
+    document.querySelector('[data-root-title]').textContent = 'Arthas 已采集到证据';
+    document.querySelector('[data-root-copy]').textContent = latest.message || '工具调用成功，正在进入 AI 根因推理。';
+    return;
+  }
+
+  if (latest.eventType === 'REPORT_GENERATED') {
+    document.querySelector('[data-root-title]').textContent = '根因分析已生成';
+    document.querySelector('[data-root-copy]').textContent = '右侧报告已更新，可继续刷新任务详情查看命令证据链。';
+    return;
+  }
+
+  if (latest.eventType === 'TASK_FAILED' || latest.eventType === 'STREAM_ERROR') {
+    document.querySelector('[data-root-title]').textContent = '链路需要检查';
+    document.querySelector('[data-root-copy]').textContent = latest.message || '后端连接或诊断任务失败，请检查服务地址和 AI 开关。';
+    return;
+  }
+
+  document.querySelector('[data-root-title]').textContent = EVENT_LABELS[latest.eventType] || latest.eventType;
+  document.querySelector('[data-root-copy]').textContent = latest.message || '诊断流程正在推进。';
+}
+
+function renderReport() {
+  const target = document.querySelector('[data-report-body]');
+
+  if (!state.reportMarkdown) {
+    target.innerHTML = `
+      <div class="report-empty">
+        <strong>暂无报告</strong>
+        <p>运行 AI 快速分析，或等待 Agent 生成 REPORT_GENERATED 事件。</p>
+      </div>
+    `;
+    return;
+  }
+
+  target.innerHTML = renderMarkdownPreview(state.reportMarkdown);
+}
+
+function renderProgress() {
+  const doneCount = Math.max(state.completedStages.size, state.activeStage);
+  const progress = Math.min(100, Math.round(((doneCount + (state.events.length ? 1 : 0)) / STAGES.length) * 100));
+  document.querySelector('[data-progress-label]').textContent = `${Math.min(doneCount + 1, STAGES.length)} / ${STAGES.length}`;
+  document.querySelector('[data-progress-bar]').style.width = `${progress}%`;
+  document.querySelector('[data-task-label]').textContent = state.taskNo || '未创建';
+  document.querySelector('[data-cost-label]').textContent = state.events[0] ? EVENT_LABELS[state.events[0].eventType] || state.events[0].eventType : '等待启动';
+}
+
+function renderResponse(response) {
+  state.lastResponse = response;
+}
+
+function setTaskNo(taskNo) {
+  state.taskNo = taskNo || '';
+  if (state.taskNo) {
+    localStorage.setItem('diagnosis.activeTaskNo', state.taskNo);
+  }
+  renderProgress();
+}
+
+function setLoading(loading, label = '') {
+  state.loading = loading;
+  [refs.startAgent, refs.quickAi, refs.demoFlow, refs.refreshDetail].forEach((button) => {
+    button.disabled = loading;
+  });
+  if (loading) setConnection('RUNNING', `${label}中`);
+}
+
+function setConnection(connection, text) {
+  state.connection = connection;
+  document.querySelector('[data-connection-dot]').dataset.state = connection.toLowerCase();
+  document.querySelector('[data-status-pill]').textContent = text || connection;
+}
+
+function resetRun() {
+  closeLiveSources(false);
+  state.events = [];
+  state.commandRecords = [];
+  state.reportMarkdown = '';
+  state.completedStages = new Set();
+  state.doneRunbook = new Set();
+  state.activeStage = 0;
+  state.activeRunbook = 0;
+  renderAll();
+}
+
+function closeLiveSources(recordEvent) {
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+
+  if (state.demoTimer) {
+    window.clearInterval(state.demoTimer);
+    state.demoTimer = null;
+  }
+
+  if (recordEvent) {
+    pushEvent({
+      eventType: 'MESSAGE',
+      message: '已停止当前事件流。',
+      success: true,
+      time: new Date().toISOString()
+    });
+  }
+}
+
+function showNotice(message) {
+  setConnection('ERROR', message);
+}
+
+function resolveStreamUrl(streamUrl) {
+  if (streamUrl?.startsWith('http')) return streamUrl;
+  if (streamUrl?.startsWith('/')) return `${state.apiBase}${streamUrl}`;
+  return `${state.apiBase}/api/diagnose/tasks/${encodeURIComponent(state.taskNo)}/stream`;
+}
+
+function normalizeApiBase(value) {
+  return String(value || 'http://localhost:9001').trim().replace(/\/+$/, '');
 }
 
 function safeJsonParse(text) {
@@ -614,489 +938,139 @@ function safeJsonParse(text) {
   }
 }
 
-function connectDiagnoseStream(apiBase, taskNo) {
-  if (!taskNo) return;
-  const streamUrl = `${apiBase}/api/diagnose/tasks/${encodeURIComponent(taskNo)}/stream`;
-  const eventSource = new EventSource(streamUrl);
-  state.eventSource = eventSource;
-  disconnectStreamButton.disabled = false;
-  markChecks(['sse-stream']);
-  setServiceState('running', 'SSE 已连接');
-
-  STREAM_EVENT_TYPES.forEach((eventType) => {
-    eventSource.addEventListener(eventType, (event) => {
-      handleDiagnoseEvent(eventType, event);
-    });
-  });
-
-  eventSource.onerror = () => {
-    if (state.eventSource !== eventSource) {
-      return;
-    }
-    pushStreamEvent({
-      eventType: 'STREAM_ERROR',
-      message: 'SSE 连接异常或已关闭',
-      time: new Date().toISOString()
-    });
-    closeEventStream(false);
-  };
+function extractReportMarkdown(data) {
+  if (!data) return '';
+  if (typeof data === 'string') return data;
+  return data.reportMarkdown || data.markdown || data.data?.reportMarkdown || '';
 }
 
-function handleDiagnoseEvent(eventType, event) {
-  const payload = safeJsonParse(event.data || '{}');
-  pushStreamEvent({
-    ...payload,
-    eventType: payload.eventType || eventType
-  });
-  markStreamChecks(eventType);
-
-  if (eventType === 'TASK_FINISHED') {
-    closeEventStream(false);
-    setServiceState('success', '诊断完成');
-    refreshDetail({ silent: true });
-  }
-
-  if (eventType === 'TASK_FAILED') {
-    closeEventStream(false);
-    setServiceState('error', '诊断失败');
-    refreshDetail({ silent: true });
-  }
-}
-
-function closeEventStream(recordHistory) {
-  if (!state.eventSource) return;
-  state.eventSource.close();
-  state.eventSource = null;
-  disconnectStreamButton.disabled = true;
-  if (recordHistory) {
-    pushHistory('断开 SSE', true);
-    setServiceState('', '等待验收');
-  }
-}
-
-function resetStreamEvents() {
-  state.sseEvents = [];
-  renderStreamEvents();
-}
-
-function pushStreamEvent(event) {
-  state.sseEvents = [
-    {
-      eventType: event.eventType || 'MESSAGE',
-      message: event.message || '',
-      command: event.command || '',
-      toolName: event.toolName || '',
-      success: event.success,
-      time: event.time || new Date().toISOString()
-    },
-    ...state.sseEvents
-  ].slice(0, 24);
-  renderStreamEvents();
-}
-
-function markStreamChecks(eventType) {
-  const ids = [];
-  if (eventType === 'TASK_CREATED') {
-    ids.push('sse-task-created');
-  }
-  if (eventType === 'INTENT_CLASSIFYING' || eventType === 'INTENT_CLASSIFIED') {
-    ids.push('sse-intent');
-  }
-  if (eventType === 'TOOL_CALL_START') {
-    ids.push('sse-tool-start');
-  }
-  if (eventType === 'TOOL_CALL_SUCCESS' || eventType === 'TOOL_CALL_FAILED') {
-    ids.push('sse-tool-result');
-  }
-  if (eventType === 'AI_ANALYZING' || eventType === 'REPORT_GENERATED') {
-    ids.push('sse-report', 'ai-report');
-  }
-  if (eventType === 'TASK_FINISHED' || eventType === 'TASK_FAILED') {
-    ids.push('sse-finished');
-  }
-  if (ids.length) {
-    markChecks(ids);
-  }
-}
-
-function getFormValues() {
-  const formData = new FormData(taskForm);
-  const values = {
-    apiBase: normalizeApiBase(formData.get('apiBase')),
-    appId: String(formData.get('appId') || '').trim(),
-    env: String(formData.get('env') || '').trim(),
-    userId: String(formData.get('userId') || '').trim(),
-    question: String(formData.get('question') || '').trim(),
-    diagnoseType: String(formData.get('diagnoseType') || 'UNKNOWN').trim(),
-    mode: String(formData.get('mode') || 'TOOL_CALLING').trim(),
-    targetUri: String(formData.get('targetUri') || '').trim(),
-    targetClass: String(formData.get('targetClass') || '').trim(),
-    targetMethod: String(formData.get('targetMethod') || '').trim()
-  };
-  localStorage.setItem('diagnosis.apiBase', values.apiBase);
-  return values;
-}
-
-function normalizeApiBase(value) {
-  const text = String(value || '').trim() || 'http://localhost:9001';
-  return text.replace(/\/+$/, '');
-}
-
-function setActiveTaskNo(taskNo, persist) {
-  state.activeTaskNo = taskNo || '';
-  taskNoInput.value = state.activeTaskNo;
-  document.querySelector('[data-active-task-pill]').textContent = state.activeTaskNo || '未创建';
-  copyTaskButton.disabled = !state.activeTaskNo;
-  if (persist) {
-    localStorage.setItem('diagnosis.activeTaskNo', state.activeTaskNo);
-  }
-}
-
-function setCommand(commandType) {
-  state.commandType = commandType;
-  commandButtons.forEach((button) => {
-    const active = button.dataset.command === commandType;
-    button.classList.toggle('is-active', active);
-    button.setAttribute('aria-pressed', String(active));
-  });
-}
-
-function setLoading(loading, label = '') {
-  state.loading = loading;
-  [
-    agentDiagnoseButton,
-    aiDiagnoseButton,
-    createButton,
-    runButton,
-    refreshButton,
-    reportButton,
-    regenerateReportButton,
-    finishButton,
-    executeTaskButton,
-    executeFreeButton,
-    missingTaskButton
-  ].forEach((button) => {
-    button.disabled = loading;
-  });
-  setServiceState(loading ? 'running' : '', loading ? `${label}中` : '等待验收');
-}
-
-function setServiceState(status, text) {
-  document.querySelector('[data-service-state]').textContent = text;
-  document.querySelector('[data-state-dot]').dataset.status = status;
-}
-
-function renderLoading() {
-  document.querySelector('[data-result-body]').innerHTML = `
-    <div class="loading-state" aria-live="polite">
-      <span></span>
-      <span></span>
-      <span></span>
-    </div>
-  `;
-}
-
-function renderResponse(response, title) {
-  state.lastResponse = response;
-  const failed = Boolean(response?.code || response?.errorMessage || response?.message);
-  document.querySelector('[data-result-body]').innerHTML = `
-    <div class="response-summary ${failed ? 'is-error' : 'is-success'}">
-      <span>${escapeHtml(title)}</span>
-      <strong>${escapeHtml(response?.taskNo || response?.requestNo || response?.code || response?.status || 'OK')}</strong>
-    </div>
-    <pre class="result-output">${escapeHtml(JSON.stringify(response, null, 2))}</pre>
-  `;
-  copyButton.disabled = false;
-  revealResult();
-}
-
-function renderReportResponse(response, title) {
-  state.lastResponse = response;
-  const markdown = response?.reportMarkdown || '';
-  state.reportMarkdown = markdown;
-  const failed = Boolean(response?.code || response?.errorMessage || response?.message || response?.status === 'FAILED');
-  document.querySelector('[data-result-body]').innerHTML = `
-    <div class="response-summary ${failed ? 'is-error' : 'is-success'}">
-      <span>${escapeHtml(title)}</span>
-      <strong>${escapeHtml(response?.taskNo || response?.code || response?.status || 'OK')}</strong>
-    </div>
-    ${markdown ? `<article class="report-preview">${renderMarkdownPreview(markdown)}</article>` : ''}
-    <pre class="result-output ${markdown ? 'compact-output' : ''}">${escapeHtml(JSON.stringify(response, null, 2))}</pre>
-  `;
-  copyButton.disabled = false;
-  revealResult();
-}
-
-function renderTaskDetail(detail) {
-  const task = detail?.task || {};
-  const records = detail?.commandRecords || [];
-  document.querySelector('[data-detail-body]').innerHTML = `
-    <div class="task-card">
-      <div class="task-status-row">
-        <span class="status-pill status-${String(task.status || '').toLowerCase()}">${escapeHtml(task.status || 'UNKNOWN')}</span>
-        <strong>${escapeHtml(task.taskNo || '-')}</strong>
-      </div>
-      <dl class="task-meta">
-        <div><dt>App</dt><dd>${escapeHtml(task.appId || '-')}</dd></div>
-        <div><dt>Env</dt><dd>${escapeHtml(task.env || '-')}</dd></div>
-        <div><dt>Type</dt><dd>${escapeHtml(task.diagnoseType || '-')}</dd></div>
-        <div><dt>User</dt><dd>${escapeHtml(task.userId || '-')}</dd></div>
-      </dl>
-      ${renderTargetInfo(task)}
-      <p class="task-question">${escapeHtml(task.question || '无问题描述')}</p>
-      ${task.conclusion ? `<p class="task-conclusion">${escapeHtml(task.conclusion)}</p>` : ''}
-      ${task.errorMessage ? `<p class="task-error">${escapeHtml(task.errorMessage)}</p>` : ''}
-    </div>
-    <div class="record-list">
-      <div class="record-head">
-        <strong>命令链路</strong>
-        <span>${records.length} 条</span>
-      </div>
-      ${records.length ? records.map(renderRecord).join('') : '<p class="subtle">当前任务还没有命令记录。</p>'}
-    </div>
-  `;
-}
-
-function renderTargetInfo(task) {
-  const items = [
-    ['URI', task.targetUri],
-    ['Class', task.targetClass],
-    ['Method', task.targetMethod]
-  ].filter(([, value]) => value);
-
-  if (!items.length) return '';
-
-  return `
-    <dl class="target-meta">
-      ${items.map(([label, value]) => `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}
-    </dl>
-  `;
-}
-
-function renderRecord(record, index) {
-  return `
-    <article class="record-item">
-      <span class="record-index">${index + 1}</span>
-      <div>
-        <strong>${escapeHtml(record.command || record.commandType || '-')}</strong>
-        <span>${escapeHtml(record.requestNo || '-')}</span>
-      </div>
-      <small class="${record.success ? 'ok' : 'fail'}">${record.success ? '成功' : '失败'} / ${record.costMillis ?? 0} ms</small>
-    </article>
-  `;
-}
-
-function renderEmptyDetail() {
-  return `
-    <div class="empty-state compact-empty">
-      <span class="empty-line"></span>
-      <p>创建任务后可查看状态和命令链路。</p>
-    </div>
-  `;
-}
-
-function markChecks(ids) {
-  ids.forEach((id) => state.checks.add(id));
-  renderChecklist();
-}
-
-function markRunChecks(diagnoseType, response) {
-  const ids = ['run-api', 'schema-record'];
-  const commands = (response.commandResults || []).map((item) => item.command);
-
-  if (response.status === 'FINISHED') {
-    ids.push('status-finished', 'record-task-no', 'detail-records');
-  }
-  if (response.status === 'FAILED') {
-    ids.push('status-failed');
-  }
-
-  if (diagnoseType === 'HIGH_CPU' && commands.includes('dashboard -n 1') && commands.includes('thread -n 5')) {
-    ids.push('plan-high-cpu');
-  }
-  if (diagnoseType === 'MEMORY_ABNORMAL'
-    && commands.includes('memory')
-    && commands.includes('dashboard -n 1')
-    && commands.includes('jvm')) {
-    ids.push('plan-memory');
-  }
-  if (diagnoseType === 'THREAD_BLOCKED'
-    && commands.includes('dashboard -n 1')
-    && commands.includes('thread')
-    && commands.includes('thread -b')) {
-    ids.push('plan-thread');
-  }
-  if (diagnoseType === 'SLOW_REQUEST' && commands.some((command) => command.startsWith('trace ') && command.endsWith(' -n 3'))) {
-    ids.push('plan-slow');
-  }
-
-  markChecks(ids);
-}
-
-function markAiChecks(response) {
-  const ids = ['ai-api'];
-  if (response.taskNo) {
-    ids.push('ai-create-task', 'schema-task');
-  }
-  if (response.diagnoseType && response.diagnoseType !== 'UNKNOWN') {
-    ids.push('ai-intent');
-  }
-  if (response.status === 'FINISHED') {
-    ids.push('ai-run-rule', 'status-finished', 'schema-record');
-  }
-  if (response.status === 'FAILED') {
-    ids.push('status-failed');
-  }
-  if (response.reportMarkdown) {
-    ids.push('ai-report', 'report-schema');
-  }
-  markChecks(ids);
-}
-
-function renderChecklist() {
-  const list = document.querySelector('[data-checklist]');
-  if (!list) return;
-  list.innerHTML = ACCEPTANCE_ITEMS.map((item) => {
-    const checked = state.checks.has(item.id);
-    return `
-      <label class="check-item ${checked ? 'is-done' : ''}">
-        <input type="checkbox" ${checked ? 'checked' : ''} data-check="${item.id}" ${item.manual ? '' : 'disabled'} />
-        <span>${escapeHtml(item.label)}</span>
-        ${item.manual ? '<small>人工确认</small>' : ''}
-      </label>
-    `;
-  }).join('');
-
-  list.querySelectorAll('[data-check]').forEach((input) => {
-    input.addEventListener('change', () => {
-      if (input.checked) {
-        state.checks.add(input.dataset.check);
-      } else {
-        state.checks.delete(input.dataset.check);
-      }
-      renderChecklist();
-    });
-  });
-
-  document.querySelector('[data-check-count]').textContent = `${state.checks.size}/${ACCEPTANCE_ITEMS.length}`;
-}
-
-function pushHistory(label, success) {
-  state.history = [
-    {
-      label,
-      success,
-      at: new Date().toLocaleTimeString('zh-CN', { hour12: false })
-    },
-    ...state.history
-  ].slice(0, 6);
-  renderHistory();
-}
-
-function renderHistory() {
-  const list = document.querySelector('[data-history-list]');
-  list.innerHTML = state.history.map((item) => `
-    <article class="history-item">
-      <div>
-        <strong>${escapeHtml(item.label)}</strong>
-        <span>${escapeHtml(item.at)}</span>
-      </div>
-      <small class="${item.success ? 'ok' : 'fail'}">${item.success ? '成功' : '失败'}</small>
-    </article>
-  `).join('');
-}
-
-function renderStreamEvents() {
-  const list = document.querySelector('[data-stream-list]');
-  const count = document.querySelector('[data-stream-count]');
-  if (!list || !count) return;
-  count.textContent = `${state.sseEvents.length} 条`;
-  if (!state.sseEvents.length) {
-    list.innerHTML = '<p class="subtle">启动 Agent 实时诊断后，这里会显示 SSE 事件。</p>';
-    return;
-  }
-  list.innerHTML = state.sseEvents.map((event) => {
-    const stateClass = event.success === false
-      ? 'fail'
-      : event.success === true
-        ? 'ok'
-        : '';
-    return `
-      <article class="stream-item">
-        <div>
-          <strong>${escapeHtml(event.eventType)}</strong>
-          <span>${escapeHtml(formatEventTime(event.time))}</span>
-        </div>
-        <p>${escapeHtml(event.message || event.command || '-')}</p>
-        ${event.toolName || event.command ? `
-          <small class="${stateClass}">
-            ${escapeHtml([event.toolName, event.command].filter(Boolean).join(' / '))}
-          </small>
-        ` : ''}
-      </article>
-    `;
-  }).join('');
-}
-
-function formatEventTime(value) {
-  if (!value) return '';
+function formatTime(value) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return String(value).replace('T', ' ').slice(0, 19);
-  }
+  if (Number.isNaN(date.getTime())) return String(value || '').slice(0, 19);
   return date.toLocaleTimeString('zh-CN', { hour12: false });
 }
 
+function renderMarkdownPreview(markdown) {
+  const lines = String(markdown || '').split('\n');
+  let listOpen = false;
+  const html = [];
+
+  lines.forEach((line) => {
+    const text = line.trim();
+    if (!text) {
+      if (listOpen) {
+        html.push('</ul>');
+        listOpen = false;
+      }
+      return;
+    }
+
+    if (text.startsWith('## ')) {
+      if (listOpen) {
+        html.push('</ul>');
+        listOpen = false;
+      }
+      html.push(`<h4>${escapeHtml(text.slice(3))}</h4>`);
+      return;
+    }
+
+    if (text.startsWith('# ')) {
+      if (listOpen) {
+        html.push('</ul>');
+        listOpen = false;
+      }
+      html.push(`<h4>${escapeHtml(text.slice(2))}</h4>`);
+      return;
+    }
+
+    if (text.startsWith('- ')) {
+      if (!listOpen) {
+        html.push('<ul>');
+        listOpen = true;
+      }
+      html.push(`<li>${escapeHtml(text.slice(2))}</li>`);
+      return;
+    }
+
+    if (listOpen) {
+      html.push('</ul>');
+      listOpen = false;
+    }
+    html.push(`<p>${escapeHtml(text)}</p>`);
+  });
+
+  if (listOpen) html.push('</ul>');
+  return html.join('');
+}
+
+function demoReport() {
+  return [
+    '# 诊断结论',
+    '热点线程集中在订单创建链路，业务方法占用时间异常。',
+    '',
+    '## 建议',
+    '- 先对 OrderService#createOrder 增加限流和慢调用日志。',
+    '- 复查下游库存接口超时配置。',
+    '- 修复后再次运行同一任务验证 P95 是否回落。'
+  ].join('\n');
+}
+
 function runIntroAnimation() {
-  if (reduceMotion) return;
+  if (reduceMotion) {
+    document.querySelectorAll('.reveal').forEach((item) => item.classList.add('is-visible'));
+    return;
+  }
+
   anime({
     targets: '.reveal',
-    translateY: [12, 0],
     opacity: [0, 1],
+    translateY: [12, 0],
     delay: anime.stagger(70),
-    duration: 520,
+    duration: 620,
     easing: 'easeOutCubic'
   });
 }
 
-function animateSignal() {
+function animateEvent(stage, runbookChanged = false) {
   if (reduceMotion) return;
-  anime.remove('.command-button.is-active');
-  anime({
-    targets: '.command-button.is-active',
-    scale: [0.98, 1],
-    duration: 240,
-    easing: 'easeOutCubic'
+
+  const node = Number.isInteger(stage) ? document.querySelector(`[data-stage="${stage}"] .node-shell`) : null;
+  const streamItem = document.querySelector('.stream-item');
+  const planStep = runbookChanged ? document.querySelector(`[data-runbook="${state.activeRunbook}"]`) : null;
+  const edge = Number.isInteger(stage) && stage > 0 ? document.querySelector(`[data-edge="${stage - 1}"]`) : null;
+
+  [node, streamItem, planStep].filter(Boolean).forEach((target) => {
+    anime.remove(target);
+    anime({
+      targets: target,
+      scale: [0.98, 1],
+      translateY: [6, 0],
+      duration: 420,
+      easing: 'easeOutCubic'
+    });
   });
+
+  if (edge) {
+    anime.remove(edge);
+    anime({
+      targets: edge,
+      scaleX: [0.15, 1],
+      opacity: [0.2, 1],
+      duration: 520,
+      easing: 'easeOutCubic'
+    });
+  }
 }
 
-function animateButton(button) {
+function animatePress(button) {
   if (reduceMotion) return;
+  anime.remove(button);
   anime({
     targets: button,
-    scale: [0.98, 1],
+    scale: [0.97, 1],
     duration: 220,
     easing: 'easeOutCubic'
   });
-}
-
-function revealResult() {
-  if (reduceMotion) return;
-  anime({
-    targets: ['.response-summary', '.report-preview', '.result-output'],
-    translateY: [8, 0],
-    opacity: [0, 1],
-    delay: anime.stagger(60),
-    duration: 360,
-    easing: 'easeOutCubic'
-  });
-}
-
-function flashButton(button, text, resetText) {
-  button.textContent = text;
-  setTimeout(() => {
-    button.textContent = resetText;
-  }, 1200);
 }
 
 function escapeHtml(value) {
@@ -1106,23 +1080,4 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-function renderMarkdownPreview(markdown) {
-  const lines = markdown.split('\n');
-  return lines.map((line) => {
-    if (line.startsWith('# ')) {
-      return `<h3>${escapeHtml(line.slice(2))}</h3>`;
-    }
-    if (line.startsWith('## ')) {
-      return `<h4>${escapeHtml(line.slice(3))}</h4>`;
-    }
-    if (line.startsWith('- ')) {
-      return `<p class="report-line">- ${escapeHtml(line.slice(2))}</p>`;
-    }
-    if (!line.trim()) {
-      return '<span class="report-space"></span>';
-    }
-    return `<p>${escapeHtml(line)}</p>`;
-  }).join('');
 }
