@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wuxx.diagnosis.config.DiagnosisArthasProperties;
 import com.wuxx.diagnosis.domain.AppInstance;
 import com.wuxx.diagnosis.domain.ArthasApiResponse;
@@ -13,6 +14,7 @@ import com.wuxx.diagnosis.domain.ArthasExecuteResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -28,6 +30,8 @@ public class ArthasHttpCommandExecutor implements ArthasCommandExecutor {
 
     private final DiagnosisArthasProperties properties;
 
+    private final ObjectMapper objectMapper;
+
     @Override
     public ArthasExecuteResponse execute(AppInstance instance, String requestNo, String command, String commandType) {
         long start = System.currentTimeMillis();
@@ -38,13 +42,13 @@ public class ArthasHttpCommandExecutor implements ArthasCommandExecutor {
             log.info("Calling Arthas HTTP API, requestNo={}, url={}, commandType={}",
                     requestNo, apiUrl, commandType);
 
-            ArthasApiResponse apiResponse = restClient.post()
+            byte[] responseBody = restClient.post()
                     .uri(apiUrl)
-                    .headers(headers -> applyBasicAuth(headers, instance))
+                    .headers(headers -> applyHeaders(headers, instance))
                     .body(buildRequestBody(command))
-                    .retrieve()
-                    .body(ArthasApiResponse.class);
+                    .exchange((request, response) -> response.getBody().readAllBytes());
 
+            ArthasApiResponse apiResponse = parseResponse(responseBody);
             validateState(apiResponse);
             String output = truncate(extractOutput(apiResponse), properties.getMaxOutputLength());
 
@@ -85,7 +89,8 @@ public class ArthasHttpCommandExecutor implements ArthasCommandExecutor {
         return "http://" + instance.getIp() + ":" + instance.getArthasHttpPort() + "/api";
     }
 
-    private void applyBasicAuth(HttpHeaders headers, AppInstance instance) {
+    private void applyHeaders(HttpHeaders headers, AppInstance instance) {
+        headers.setAccept(MediaType.parseMediaTypes("application/json, application/octet-stream, */*"));
         // Arthas HTTP 认证是实例级配置；未配置用户名时保持无认证请求，兼容本地默认启动方式。
         if (!StringUtils.hasText(instance.getArthasUsername())) {
             return;
@@ -93,6 +98,18 @@ public class ArthasHttpCommandExecutor implements ArthasCommandExecutor {
         String credentials = instance.getArthasUsername() + ":" + nullToEmpty(instance.getArthasPassword());
         String encodedCredentials = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
         headers.set(HttpHeaders.AUTHORIZATION, "Basic " + encodedCredentials);
+    }
+
+    private ArthasApiResponse parseResponse(byte[] responseBody) throws Exception {
+        if (responseBody == null || responseBody.length == 0) {
+            throw new IllegalStateException("Empty Arthas response");
+        }
+
+        String text = new String(responseBody, StandardCharsets.UTF_8);
+        if (!StringUtils.hasText(text)) {
+            throw new IllegalStateException("Empty Arthas response");
+        }
+        return objectMapper.readValue(text, ArthasApiResponse.class);
     }
 
     private void validateState(ArthasApiResponse response) {

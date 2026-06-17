@@ -77,6 +77,19 @@ public interface DiagnoseTaskMapper {
 
     @Update("""
             UPDATE diagnose_task
+            SET diagnose_type = #{diagnoseType},
+                target_class = #{targetClass},
+                target_method = #{targetMethod},
+                updated_at = NOW()
+            WHERE task_no = #{taskNo}
+            """)
+    int updateIntent(@Param("taskNo") String taskNo,
+                     @Param("diagnoseType") String diagnoseType,
+                     @Param("targetClass") String targetClass,
+                     @Param("targetMethod") String targetMethod);
+
+    @Update("""
+            UPDATE diagnose_task
             SET status = #{status},
                 conclusion = #{conclusion},
                 error_message = #{errorMessage},

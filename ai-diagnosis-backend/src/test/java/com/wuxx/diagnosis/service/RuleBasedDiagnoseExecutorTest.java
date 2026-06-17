@@ -86,7 +86,7 @@ class RuleBasedDiagnoseExecutorTest {
         private final List<String> commandTypes = new ArrayList<>();
 
         CapturingArthasCommandService(boolean success) {
-            super(null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null);
             this.success = success;
         }
 
@@ -136,6 +136,15 @@ class RuleBasedDiagnoseExecutorTest {
         @Override
         public int updateStatus(String taskNo, String status) {
             statuses.put(taskNo, status);
+            return 1;
+        }
+
+        @Override
+        public int updateIntent(String taskNo, String diagnoseType, String targetClass, String targetMethod) {
+            DiagnoseTask task = tasks.get(taskNo);
+            task.setDiagnoseType(diagnoseType);
+            task.setTargetClass(targetClass);
+            task.setTargetMethod(targetMethod);
             return 1;
         }
 

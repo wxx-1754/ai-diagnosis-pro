@@ -18,7 +18,6 @@ public class ArthasCommandGuard {
     private static final Set<String> ALLOWED_COMMANDS = Set.of(
             "dashboard -n 1",
             "thread",
-            "thread -n 5",
             "thread -b",
             "jvm",
             "memory"
@@ -61,8 +60,44 @@ public class ArthasCommandGuard {
             return;
         }
 
+        if ("thread".equals(normalized) || "thread -b".equals(normalized)) {
+            return;
+        }
+
+        if (normalized.startsWith("thread -n")) {
+            checkThreadTopCommand(normalized);
+            return;
+        }
+
+        if (normalized.startsWith("thread ")) {
+            checkThreadStackCommand(normalized);
+            return;
+        }
+
         if (!ALLOWED_COMMANDS.contains(normalized)) {
             throw new SecurityException("Unsupported Arthas command detail: " + normalized);
+        }
+    }
+
+    private void checkThreadTopCommand(String command) {
+        String[] parts = command.split("\\s+");
+        if (parts.length != 3 || !"thread".equals(parts[0]) || !"-n".equals(parts[1])) {
+            throw new SecurityException("Only thread -n {1~10} is allowed");
+        }
+        int topN = parsePositiveInt(parts[2], "Invalid thread topN: " + parts[2]);
+        if (topN < 1 || topN > 10) {
+            throw new SecurityException("thread -n only allows 1~10");
+        }
+    }
+
+    private void checkThreadStackCommand(String command) {
+        String[] parts = command.split("\\s+");
+        if (parts.length != 2 || !"thread".equals(parts[0])) {
+            throw new SecurityException("Only thread {threadId} is allowed");
+        }
+        long threadId = parsePositiveLong(parts[1], "Invalid threadId: " + parts[1]);
+        if (threadId <= 0) {
+            throw new SecurityException("threadId must be positive");
         }
     }
 
@@ -82,6 +117,22 @@ public class ArthasCommandGuard {
         }
         if (!"-n".equals(parts[3]) || !"3".equals(parts[4])) {
             throw new SecurityException("Only trace -n 3 is allowed");
+        }
+    }
+
+    private int parsePositiveInt(String value, String message) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            throw new SecurityException(message);
+        }
+    }
+
+    private long parsePositiveLong(String value, String message) {
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException exception) {
+            throw new SecurityException(message);
         }
     }
 

@@ -4,6 +4,14 @@ server:
 spring:
   application:
     name: ai-diagnosis-backend
+  ai:
+    openai:
+      api-key: ${AI_API_KEY:}
+      base-url: ${AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+      chat:
+        options:
+          model: ${AI_CHAT_MODEL:qwen-plus}
+          temperature: ${AI_CHAT_TEMPERATURE:0.1}
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:ai_diagnosis}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USERNAME:root}
@@ -24,8 +32,17 @@ logging:
     org.springframework.jdbc: INFO
 
 diagnosis:
+  ai:
+    enable: ${DIAGNOSIS_AI_ENABLE:true}
+    max-arthas-output-length: ${DIAGNOSIS_AI_MAX_ARTHAS_OUTPUT_LENGTH:30000}
+    per-command-output-limit: ${DIAGNOSIS_AI_PER_COMMAND_OUTPUT_LIMIT:8000}
+    intent-temperature: ${DIAGNOSIS_AI_INTENT_TEMPERATURE:0}
+    report-temperature: ${DIAGNOSIS_AI_REPORT_TEMPERATURE:0.1}
+    min-confidence: ${DIAGNOSIS_AI_MIN_CONFIDENCE:0.6}
+    prompt-version: ${DIAGNOSIS_AI_PROMPT_VERSION:v1}
+    chat-model: ${AI_CHAT_MODEL:qwen-plus}
   arthas:
-    connect-timeout-ms: 3000
-    read-timeout-ms: 10000
-    max-output-length: 20000
-    audit-output-excerpt-length: 4000
+    connect-timeout-ms: ${DIAGNOSIS_ARTHAS_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${DIAGNOSIS_ARTHAS_READ_TIMEOUT_MS:60000}
+    max-output-length: ${DIAGNOSIS_ARTHAS_MAX_OUTPUT_LENGTH:20000}
+    audit-output-excerpt-length: ${DIAGNOSIS_ARTHAS_AUDIT_OUTPUT_EXCERPT_LENGTH:4000}

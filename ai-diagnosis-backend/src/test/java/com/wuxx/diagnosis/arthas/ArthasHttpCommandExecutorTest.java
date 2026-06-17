@@ -11,6 +11,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wuxx.diagnosis.config.DiagnosisArthasProperties;
 import com.wuxx.diagnosis.domain.AppInstance;
 import com.wuxx.diagnosis.domain.ArthasExecuteResponse;
@@ -30,7 +31,8 @@ class ArthasHttpCommandExecutorTest {
         ArthasHttpCommandExecutor executor = new ArthasHttpCommandExecutor(
                 restClientBuilder.build(),
                 new ArthasCommandGuard(),
-                properties()
+                properties(),
+                new ObjectMapper()
         );
 
         server.expect(once(), requestTo("http://127.0.0.1:8563/api"))
@@ -61,13 +63,54 @@ class ArthasHttpCommandExecutorTest {
     }
 
     @Test
+    void executeParsesJsonResponseWhenArthasReturnsOctetStream() {
+        RestClient.Builder restClientBuilder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restClientBuilder).build();
+        ArthasHttpCommandExecutor executor = new ArthasHttpCommandExecutor(
+                restClientBuilder.build(),
+                new ArthasCommandGuard(),
+                properties(),
+                new ObjectMapper()
+        );
+
+        server.expect(once(), requestTo("http://127.0.0.1:8563/api"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.command").value("trace com.example.OrderController createOrder -n 3"))
+                .andRespond(withSuccess("""
+                        {
+                          "state": "SUCCEEDED",
+                          "body": {
+                            "results": [
+                              {
+                                "type": "trace",
+                                "content": "trace output"
+                              }
+                            ]
+                          }
+                        }
+                        """, MediaType.APPLICATION_OCTET_STREAM));
+
+        ArthasExecuteResponse response = executor.execute(
+                instance(),
+                "REQ-TRACE",
+                "trace com.example.OrderController createOrder -n 3",
+                "trace"
+        );
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(response.getOutput()).contains("trace output");
+        server.verify();
+    }
+
+    @Test
     void executeReturnsFailureWhenArthasStateFails() {
         RestClient.Builder restClientBuilder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(restClientBuilder).build();
         ArthasHttpCommandExecutor executor = new ArthasHttpCommandExecutor(
                 restClientBuilder.build(),
                 new ArthasCommandGuard(),
-                properties()
+                properties(),
+                new ObjectMapper()
         );
 
         server.expect(once(), requestTo("http://127.0.0.1:8563/api"))

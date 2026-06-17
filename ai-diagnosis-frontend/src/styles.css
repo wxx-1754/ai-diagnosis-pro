@@ -355,6 +355,75 @@ textarea:focus {
   margin-top: 4px;
 }
 
+.stream-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.stream-head,
+.stream-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stream-actions {
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.stream-list {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.stream-item {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.stream-item div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stream-item strong,
+.stream-item small {
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+}
+
+.stream-item strong,
+.stream-item p,
+.stream-item small {
+  overflow-wrap: anywhere;
+}
+
+.stream-item span,
+.stream-item small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stream-item p {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .primary-button,
 .secondary-button,
 .danger-button,
@@ -493,6 +562,53 @@ textarea:focus {
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.compact-output {
+  min-height: 150px;
+  max-height: 220px;
+}
+
+.report-preview {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 14px;
+  line-height: 1.55;
+}
+
+.report-preview h3,
+.report-preview h4,
+.report-preview p {
+  margin: 0;
+}
+
+.report-preview h3 {
+  font-size: 18px;
+}
+
+.report-preview h4 {
+  margin-top: 7px;
+  color: var(--accent-strong);
+  font-size: 14px;
+}
+
+.report-preview p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.report-line {
+  padding-left: 8px;
+}
+
+.report-space {
+  height: 3px;
 }
 
 .task-card {
@@ -792,6 +908,7 @@ dd {
 
   .section-head,
   .result-head,
+  .stream-head,
   .action-row {
     align-items: stretch;
     flex-direction: column;

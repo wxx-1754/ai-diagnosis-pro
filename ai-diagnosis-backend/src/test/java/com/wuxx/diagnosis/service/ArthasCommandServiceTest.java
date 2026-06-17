@@ -20,6 +20,7 @@ import com.wuxx.diagnosis.domain.DiagnoseTask;
 import com.wuxx.diagnosis.domain.DiagnoseTaskStatus;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
 import com.wuxx.diagnosis.mapper.DiagnoseTaskMapper;
+import com.wuxx.diagnosis.sse.DiagnoseSseManager;
 import org.junit.jupiter.api.Test;
 
 class ArthasCommandServiceTest {
@@ -127,7 +128,8 @@ class ArthasCommandServiceTest {
                 executor,
                 recordMapper,
                 properties,
-                new DiagnoseTaskService(diagnoseTaskMapper)
+                new DiagnoseTaskService(diagnoseTaskMapper),
+                new DiagnoseSseManager()
         );
     }
 
@@ -234,6 +236,15 @@ class ArthasCommandServiceTest {
         @Override
         public int updateStatus(String taskNo, String status) {
             statuses.put(taskNo, status);
+            return 1;
+        }
+
+        @Override
+        public int updateIntent(String taskNo, String diagnoseType, String targetClass, String targetMethod) {
+            DiagnoseTask task = tasks.get(taskNo);
+            task.setDiagnoseType(diagnoseType);
+            task.setTargetClass(targetClass);
+            task.setTargetMethod(targetMethod);
             return 1;
         }
 

@@ -1,0 +1,17 @@
+package com.wuxx.diagnosis.sse;
+
+public enum DiagnoseEventType {
+
+    TASK_CREATED,
+    INTENT_CLASSIFYING,
+    INTENT_CLASSIFIED,
+    PLAN_CREATED,
+    TOOL_CALL_START,
+    TOOL_CALL_SUCCESS,
+    TOOL_CALL_FAILED,
+    AI_ANALYZING,
+    REPORT_GENERATED,
+    TASK_FINISHED,
+    TASK_FAILED,
+    HEARTBEAT
+}

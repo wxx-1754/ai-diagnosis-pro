@@ -59,6 +59,18 @@ public class DiagnoseTaskService {
         diagnoseTaskMapper.updateStatus(taskNo, DiagnoseTaskStatus.RUNNING.name());
     }
 
+    public void updateIntent(String taskNo, String diagnoseType, String targetClass, String targetMethod) {
+        getByTaskNo(taskNo);
+        diagnoseTaskMapper.updateIntent(taskNo, resolveDiagnoseType(diagnoseType), targetClass, targetMethod);
+    }
+
+    public void checkTaskAppEnv(String taskNo, String appId, String env) {
+        DiagnoseTask task = getByTaskNo(taskNo);
+        if (!equalsIgnoreCase(task.getAppId(), appId) || !equalsIgnoreCase(task.getEnv(), env)) {
+            throw new SecurityException("诊断任务与目标应用不匹配，taskNo=" + taskNo);
+        }
+    }
+
     public void markFinished(String taskNo, String conclusion) {
         getByTaskNo(taskNo);
         diagnoseTaskMapper.finishTask(taskNo, DiagnoseTaskStatus.FINISHED.name(), conclusion, null);
@@ -84,5 +96,9 @@ public class DiagnoseTaskService {
         String date = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         int random = ThreadLocalRandom.current().nextInt(1000, 10000);
         return "DIAG-" + date + "-" + random;
+    }
+
+    private boolean equalsIgnoreCase(String first, String second) {
+        return first != null && second != null && first.equalsIgnoreCase(second);
     }
 }

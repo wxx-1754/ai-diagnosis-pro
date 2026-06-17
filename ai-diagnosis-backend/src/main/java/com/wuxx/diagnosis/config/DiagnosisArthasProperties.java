@@ -11,7 +11,7 @@ public class DiagnosisArthasProperties {
 
     private int connectTimeoutMs = 3000;
 
-    private int readTimeoutMs = 10000;
+    private int readTimeoutMs = 60000;
 
     private int maxOutputLength = 20000;
 

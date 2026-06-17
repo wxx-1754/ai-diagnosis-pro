@@ -27,7 +27,7 @@ class ArthasCommandControllerTest {
         private ArthasExecuteRequest request;
 
         CapturingArthasCommandService() {
-            super(null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null);
         }
 
         @Override
