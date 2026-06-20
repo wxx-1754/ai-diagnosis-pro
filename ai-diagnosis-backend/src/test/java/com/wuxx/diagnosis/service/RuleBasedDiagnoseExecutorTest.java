@@ -56,7 +56,7 @@ class RuleBasedDiagnoseExecutorTest {
 
     private RuleBasedDiagnoseExecutor executor(CapturingDiagnoseTaskMapper taskMapper,
                                                CapturingArthasCommandService commandService) {
-        DiagnoseTaskService taskService = new DiagnoseTaskService(taskMapper);
+        DiagnoseTaskService taskService = new DiagnoseTaskService(taskMapper, null, null);
         return new RuleBasedDiagnoseExecutor(
                 taskService,
                 new DiagnosePlanBuilder(new ArthasCommandFactory()),
@@ -134,9 +134,26 @@ class RuleBasedDiagnoseExecutorTest {
         }
 
         @Override
+        public int deleteByTaskNo(String taskNo) {
+            tasks.remove(taskNo);
+            return 1;
+        }
+
+        @Override
         public int updateStatus(String taskNo, String status) {
             statuses.put(taskNo, status);
             return 1;
+        }
+
+        @Override
+        public int markInterruptedIfActive(String taskNo, String reason) {
+            statuses.put(taskNo, DiagnoseTaskStatus.INTERRUPTED.name());
+            return 1;
+        }
+
+        @Override
+        public java.util.List<DiagnoseTask> findActiveTasks() {
+            return java.util.List.of();
         }
 
         @Override
@@ -154,6 +171,32 @@ class RuleBasedDiagnoseExecutorTest {
             conclusions.put(taskNo, conclusion);
             errorMessages.put(taskNo, errorMessage);
             return 1;
+        }
+
+        @Override
+        public java.util.List<com.wuxx.diagnosis.domain.DiagnoseTaskListItem> pageQuery(
+                com.wuxx.diagnosis.domain.DiagnoseTaskQuery query, int offset, int limit) {
+            return java.util.List.of();
+        }
+
+        @Override
+        public long count(com.wuxx.diagnosis.domain.DiagnoseTaskQuery query) {
+            return 0L;
+        }
+
+        @Override
+        public java.util.Map<String, Object> countByStatus(java.time.LocalDateTime startTime) {
+            return java.util.Map.of();
+        }
+
+        @Override
+        public java.util.List<java.util.Map<String, Object>> countByType(java.time.LocalDateTime startTime) {
+            return java.util.List.of();
+        }
+
+        @Override
+        public java.util.List<java.util.Map<String, Object>> dailyTrend(java.time.LocalDateTime startTime) {
+            return java.util.List.of();
         }
     }
 }

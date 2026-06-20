@@ -67,6 +67,14 @@ diagnosis:
 
 ## 启动
 
+首次升级到支持“接续观察”的版本前，需要手动执行版本化 SQL：
+
+```text
+src/main/resources/db/migration/V20260620_01__create_diagnose_event.sql
+```
+
+该脚本新增持久化诊断事件表。本项目暂未接入 Flyway，应用不会自动执行此脚本。
+
 ```bash
 mvn spring-boot:run
 ```

@@ -4,6 +4,7 @@ public enum DiagnoseTaskStatus {
 
     CREATED,
     RUNNING,
+    INTERRUPTED,
     FINISHED,
     FAILED
 }

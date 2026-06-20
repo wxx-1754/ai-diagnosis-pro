@@ -48,7 +48,7 @@ public class ArthasDiagnosticTools {
         return execute(taskNo, appId, env, "jvmInfo", "jvm");
     }
 
-    @Tool(description = "追踪指定 Java 类和方法的调用耗时，用于分析接口慢或方法慢问题。只允许 className 和 methodName，执行次数固定为 3")
+    @Tool(description = "追踪指定 Java 类和方法的真实调用耗时，用于分析接口慢或方法慢问题。固定采集 3 次，默认最多等待 90 秒")
     public ArthasExecuteResponse traceMethod(String taskNo,
                                              String appId,
                                              String env,

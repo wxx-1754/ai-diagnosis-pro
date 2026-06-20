@@ -21,6 +21,8 @@ import com.wuxx.diagnosis.domain.ai.DiagnosisReportPayload;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
 import com.wuxx.diagnosis.service.DiagnoseReportService;
 import com.wuxx.diagnosis.service.DiagnoseTaskService;
+import com.wuxx.diagnosis.service.DiagnoseEventService;
+import com.wuxx.diagnosis.service.TaskExecutionRegistry;
 import com.wuxx.diagnosis.sse.DiagnoseEvent;
 import com.wuxx.diagnosis.sse.DiagnoseEventType;
 import com.wuxx.diagnosis.sse.DiagnoseSseManager;
@@ -58,6 +60,10 @@ public class AgentDiagnoseAsyncService {
 
     private final ObjectMapper objectMapper;
 
+    private final TaskExecutionRegistry executionRegistry;
+
+    private final DiagnoseEventService diagnoseEventService;
+
     public AgentDiagnoseAsyncService(DiagnoseTaskService diagnoseTaskService,
                                      DiagnoseIntentClassifier intentClassifier,
                                      HybridDiagnosisExecutor hybridDiagnosisExecutor,
@@ -68,7 +74,9 @@ public class AgentDiagnoseAsyncService {
                                      ArthasCommandRecordMapper commandRecordMapper,
                                      DiagnosisAiProperties properties,
                                      DiagnosisInsightSummarizer insightSummarizer,
-                                     ObjectMapper objectMapper) {
+                                     ObjectMapper objectMapper,
+                                     TaskExecutionRegistry executionRegistry,
+                                     DiagnoseEventService diagnoseEventService) {
         this.diagnoseTaskService = diagnoseTaskService;
         this.intentClassifier = intentClassifier;
         this.hybridDiagnosisExecutor = hybridDiagnosisExecutor;
@@ -80,14 +88,41 @@ public class AgentDiagnoseAsyncService {
         this.properties = properties;
         this.insightSummarizer = insightSummarizer;
         this.objectMapper = objectMapper;
+        this.executionRegistry = executionRegistry;
+        this.diagnoseEventService = diagnoseEventService;
     }
 
     public String start(AgentDiagnoseStartRequest request) {
         DiagnoseTaskCreateResponse createResponse = diagnoseTaskService.createTask(buildCreateRequest(request));
         String taskNo = createResponse.getTaskNo();
         send(taskNo, DiagnoseEventType.TASK_CREATED, "诊断任务已创建", createResponse);
-        diagnosisExecutor.execute(() -> runAsync(taskNo, request));
+        executionRegistry.register(taskNo);
+        try {
+            diagnosisExecutor.execute(() -> runAsync(taskNo, request));
+        } catch (RuntimeException exception) {
+            executionRegistry.unregister(taskNo);
+            diagnoseTaskService.markFailed(taskNo, "诊断任务提交失败：" + exception.getMessage());
+            send(taskNo, DiagnoseEventType.TASK_FAILED, "诊断任务提交失败：" + exception.getMessage(), null);
+            throw exception;
+        }
         return taskNo;
+    }
+
+    public String restart(String sourceTaskNo) {
+        DiagnoseTask source = diagnoseTaskService.getByTaskNo(sourceTaskNo);
+        if (!DiagnoseTaskStatus.INTERRUPTED.name().equals(source.getStatus())) {
+            throw new IllegalStateException("只有 INTERRUPTED 状态的诊断任务才能重新诊断，taskNo=" + sourceTaskNo);
+        }
+        AgentDiagnoseStartRequest request = new AgentDiagnoseStartRequest();
+        request.setAppId(source.getAppId());
+        request.setEnv(source.getEnv());
+        request.setUserId(source.getUserId());
+        request.setQuestion(source.getQuestion());
+        request.setTargetUri(source.getTargetUri());
+        request.setTargetClass(source.getTargetClass());
+        request.setTargetMethod(source.getTargetMethod());
+        request.setMode(diagnoseEventService.findExecutionMode(sourceTaskNo));
+        return start(request);
     }
 
     private void runAsync(String taskNo, AgentDiagnoseStartRequest request) {
@@ -141,6 +176,7 @@ public class AgentDiagnoseAsyncService {
             diagnoseTaskService.markFailed(taskNo, exception.getMessage());
             send(taskNo, DiagnoseEventType.TASK_FAILED, "诊断失败：" + exception.getMessage(), null);
         } finally {
+            executionRegistry.unregister(taskNo);
             sseManager.complete(taskNo);
         }
     }

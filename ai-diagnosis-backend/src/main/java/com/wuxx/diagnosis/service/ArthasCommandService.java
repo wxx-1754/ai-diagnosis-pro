@@ -50,7 +50,7 @@ public class ArthasCommandService {
             diagnoseTaskService.markRunning(request.getTaskNo());
         }
 
-        sendEvent(request, DiagnoseEventType.TOOL_CALL_START, "正在执行 Arthas 命令：" + command,
+        sendEvent(request, DiagnoseEventType.TOOL_CALL_START, startMessage(command),
                 command, null, null);
         try {
             AppInstance instance = appInstanceService.getOnlineInstance(request.getAppId(), request.getEnv());
@@ -117,6 +117,14 @@ public class ArthasCommandService {
 
     private String generateRequestNo() {
         return "ARTHAS-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String startMessage(String command) {
+        if (command != null && command.startsWith("trace ")) {
+            return "已启动 Trace 采样，正在等待目标方法被真实调用（最多采集 3 次）："
+                    + command;
+        }
+        return "正在执行 Arthas 命令：" + command;
     }
 
     private void sendEvent(ArthasExecuteRequest request,

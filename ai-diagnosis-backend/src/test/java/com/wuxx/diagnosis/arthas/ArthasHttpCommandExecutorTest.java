@@ -40,6 +40,8 @@ class ArthasHttpCommandExecutorTest {
                 .andExpect(header(HttpHeaders.AUTHORIZATION, basicAuth("arthas", "secret")))
                 .andExpect(jsonPath("$.action").value("exec"))
                 .andExpect(jsonPath("$.command").value("jvm"))
+                .andExpect(jsonPath("$.requestId").value("REQ-1"))
+                .andExpect(jsonPath("$.execTimeout").value(30000))
                 .andRespond(withSuccess("""
                         {
                           "state": "SUCCEEDED",
@@ -76,6 +78,8 @@ class ArthasHttpCommandExecutorTest {
         server.expect(once(), requestTo("http://127.0.0.1:8563/api"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.command").value("trace com.example.OrderController createOrder -n 3"))
+                .andExpect(jsonPath("$.requestId").value("REQ-TRACE"))
+                .andExpect(jsonPath("$.execTimeout").value(90000))
                 .andRespond(withSuccess("""
                         {
                           "state": "SUCCEEDED",

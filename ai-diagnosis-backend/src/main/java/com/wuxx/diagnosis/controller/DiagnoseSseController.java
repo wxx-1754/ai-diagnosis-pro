@@ -4,7 +4,9 @@ import com.wuxx.diagnosis.sse.DiagnoseSseManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -16,7 +18,13 @@ public class DiagnoseSseController {
     private final DiagnoseSseManager sseManager;
 
     @GetMapping("/{taskNo}/stream")
-    public SseEmitter stream(@PathVariable String taskNo) {
-        return sseManager.subscribe(taskNo);
+    public SseEmitter stream(@PathVariable String taskNo,
+                             @RequestParam(required = false) Long afterEventId,
+                             @RequestHeader(value = "Last-Event-ID", required = false) Long lastEventId) {
+        long cursor = Math.max(
+                afterEventId == null ? 0L : afterEventId,
+                lastEventId == null ? 0L : lastEventId
+        );
+        return sseManager.subscribe(taskNo, cursor);
     }
 }

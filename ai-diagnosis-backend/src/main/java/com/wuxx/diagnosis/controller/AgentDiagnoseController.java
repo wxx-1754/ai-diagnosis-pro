@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,6 +32,17 @@ public class AgentDiagnoseController {
                 .taskNo(taskNo)
                 .status(DiagnoseTaskStatus.CREATED.name())
                 .streamUrl("/api/diagnose/tasks/" + taskNo + "/stream")
+                .build();
+    }
+
+    @PostMapping("/{taskNo}/restart")
+    public AgentDiagnoseStartResponse restart(@PathVariable String taskNo) {
+        log.info("Received agent diagnose restart request, sourceTaskNo={}", taskNo);
+        String newTaskNo = agentDiagnoseAsyncService.restart(taskNo);
+        return AgentDiagnoseStartResponse.builder()
+                .taskNo(newTaskNo)
+                .status(DiagnoseTaskStatus.CREATED.name())
+                .streamUrl("/api/diagnose/tasks/" + newTaskNo + "/stream")
                 .build();
     }
 }

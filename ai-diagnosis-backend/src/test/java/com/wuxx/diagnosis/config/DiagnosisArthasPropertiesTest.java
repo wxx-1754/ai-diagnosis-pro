@@ -10,6 +10,8 @@ class DiagnosisArthasPropertiesTest {
     void defaultReadTimeoutLeavesEnoughTimeForTraceSampling() {
         DiagnosisArthasProperties properties = new DiagnosisArthasProperties();
 
-        assertThat(properties.getReadTimeoutMs()).isEqualTo(60000);
+        assertThat(properties.getTraceExecTimeoutMs()).isEqualTo(90000);
+        assertThat(properties.getReadTimeoutMs())
+                .isGreaterThan(properties.getTraceExecTimeoutMs());
     }
 }

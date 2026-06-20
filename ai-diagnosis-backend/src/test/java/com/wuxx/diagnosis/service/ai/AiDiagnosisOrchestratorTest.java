@@ -121,7 +121,7 @@ class AiDiagnosisOrchestratorTest {
                                                  ArthasCommandRecordMapper recordMapper,
                                                  DiagnoseReportMapper reportMapper,
                                                  DiagnosisReportGenerator reportGenerator) {
-        DiagnoseTaskService taskService = new DiagnoseTaskService(taskMapper);
+        DiagnoseTaskService taskService = new DiagnoseTaskService(taskMapper, recordMapper, reportMapper);
         return new AiDiagnosisOrchestrator(
                 classifier,
                 taskService,
@@ -245,6 +245,11 @@ class AiDiagnosisOrchestratorTest {
                     .filter(record -> taskNo.equals(record.getTaskNo()))
                     .toList();
         }
+
+        @Override
+        public int deleteByTaskNo(String taskNo) {
+            return 0;
+        }
     }
 
     private static class CapturingReportMapper implements DiagnoseReportMapper {
@@ -267,6 +272,12 @@ class AiDiagnosisOrchestratorTest {
         public DiagnoseReport findByTaskNo(String taskNo) {
             return reports.get(taskNo);
         }
+
+        @Override
+        public int deleteByTaskNo(String taskNo) {
+            reports.remove(taskNo);
+            return 1;
+        }
     }
 
     private static class CapturingDiagnoseTaskMapper implements DiagnoseTaskMapper {
@@ -285,10 +296,29 @@ class AiDiagnosisOrchestratorTest {
         }
 
         @Override
+        public int deleteByTaskNo(String taskNo) {
+            tasks.remove(taskNo);
+            return 1;
+        }
+
+        @Override
         public int updateStatus(String taskNo, String status) {
             tasks.get(taskNo).setStatus(status);
             tasks.get(taskNo).setUpdatedAt(LocalDateTime.now());
             return 1;
+        }
+
+        @Override
+        public int markInterruptedIfActive(String taskNo, String reason) {
+            DiagnoseTask task = tasks.get(taskNo);
+            task.setStatus(DiagnoseTaskStatus.INTERRUPTED.name());
+            task.setErrorMessage(reason);
+            return 1;
+        }
+
+        @Override
+        public java.util.List<DiagnoseTask> findActiveTasks() {
+            return java.util.List.of();
         }
 
         @Override
@@ -309,6 +339,32 @@ class AiDiagnosisOrchestratorTest {
             task.setErrorMessage(errorMessage);
             task.setUpdatedAt(LocalDateTime.now());
             return 1;
+        }
+
+        @Override
+        public java.util.List<com.wuxx.diagnosis.domain.DiagnoseTaskListItem> pageQuery(
+                com.wuxx.diagnosis.domain.DiagnoseTaskQuery query, int offset, int limit) {
+            return java.util.List.of();
+        }
+
+        @Override
+        public long count(com.wuxx.diagnosis.domain.DiagnoseTaskQuery query) {
+            return 0L;
+        }
+
+        @Override
+        public java.util.Map<String, Object> countByStatus(java.time.LocalDateTime startTime) {
+            return java.util.Map.of();
+        }
+
+        @Override
+        public java.util.List<java.util.Map<String, Object>> countByType(java.time.LocalDateTime startTime) {
+            return java.util.List.of();
+        }
+
+        @Override
+        public java.util.List<java.util.Map<String, Object>> dailyTrend(java.time.LocalDateTime startTime) {
+            return java.util.List.of();
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.wuxx.diagnosis.mapper;
 
 import com.wuxx.diagnosis.domain.DiagnoseReport;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -60,4 +61,10 @@ public interface DiagnoseReportMapper {
             WHERE task_no = #{taskNo}
             """)
     DiagnoseReport findByTaskNo(@Param("taskNo") String taskNo);
+
+    @Delete("""
+            DELETE FROM diagnose_report
+            WHERE task_no = #{taskNo}
+            """)
+    int deleteByTaskNo(@Param("taskNo") String taskNo);
 }

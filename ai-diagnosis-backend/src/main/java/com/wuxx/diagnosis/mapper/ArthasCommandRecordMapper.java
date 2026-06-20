@@ -1,6 +1,7 @@
 package com.wuxx.diagnosis.mapper;
 
 import com.wuxx.diagnosis.domain.ArthasCommandRecord;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -59,4 +60,10 @@ public interface ArthasCommandRecordMapper {
             ORDER BY id ASC
             """)
     List<ArthasCommandRecord> findByTaskNo(@Param("taskNo") String taskNo);
+
+    @Delete("""
+            DELETE FROM arthas_command_record
+            WHERE task_no = #{taskNo}
+            """)
+    int deleteByTaskNo(@Param("taskNo") String taskNo);
 }

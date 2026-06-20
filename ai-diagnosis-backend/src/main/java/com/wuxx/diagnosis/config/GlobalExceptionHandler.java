@@ -29,6 +29,13 @@ public class GlobalExceptionHandler {
         return ErrorResponse.of("FORBIDDEN", exception.getMessage());
     }
 
+    @ExceptionHandler(IllegalStateException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleIllegalState(IllegalStateException exception) {
+        log.warn("Conflicting diagnostic request: {}", exception.getMessage());
+        return ErrorResponse.of("CONFLICT", exception.getMessage());
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ErrorResponse handleValidation(MethodArgumentNotValidException exception) {

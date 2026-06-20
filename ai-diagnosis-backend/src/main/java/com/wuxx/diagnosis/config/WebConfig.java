@@ -16,7 +16,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "http://localhost:5174",
                         "http://127.0.0.1:5174"
                 )
-                .allowedMethods("GET", "POST", "OPTIONS")
+                .allowedMethods("GET", "POST", "DELETE", "PUT", "OPTIONS")
                 .allowedHeaders("*");
     }
 }

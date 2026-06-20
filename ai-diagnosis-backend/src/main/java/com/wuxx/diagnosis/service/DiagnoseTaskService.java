@@ -9,16 +9,41 @@ import com.wuxx.diagnosis.domain.DiagnoseTaskCreateRequest;
 import com.wuxx.diagnosis.domain.DiagnoseTaskCreateResponse;
 import com.wuxx.diagnosis.domain.DiagnoseTaskStatus;
 import com.wuxx.diagnosis.domain.DiagnoseType;
+import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
+import com.wuxx.diagnosis.mapper.DiagnoseReportMapper;
 import com.wuxx.diagnosis.mapper.DiagnoseTaskMapper;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
-@RequiredArgsConstructor
 public class DiagnoseTaskService {
 
     private final DiagnoseTaskMapper diagnoseTaskMapper;
+
+    private final ArthasCommandRecordMapper arthasCommandRecordMapper;
+
+    private final DiagnoseReportMapper diagnoseReportMapper;
+
+    private final DiagnoseEventService diagnoseEventService;
+
+    @Autowired
+    public DiagnoseTaskService(DiagnoseTaskMapper diagnoseTaskMapper,
+                               ArthasCommandRecordMapper arthasCommandRecordMapper,
+                               DiagnoseReportMapper diagnoseReportMapper,
+                               DiagnoseEventService diagnoseEventService) {
+        this.diagnoseTaskMapper = diagnoseTaskMapper;
+        this.arthasCommandRecordMapper = arthasCommandRecordMapper;
+        this.diagnoseReportMapper = diagnoseReportMapper;
+        this.diagnoseEventService = diagnoseEventService;
+    }
+
+    public DiagnoseTaskService(DiagnoseTaskMapper diagnoseTaskMapper,
+                               ArthasCommandRecordMapper arthasCommandRecordMapper,
+                               DiagnoseReportMapper diagnoseReportMapper) {
+        this(diagnoseTaskMapper, arthasCommandRecordMapper, diagnoseReportMapper, null);
+    }
 
     public DiagnoseTaskCreateResponse createTask(DiagnoseTaskCreateRequest request) {
         String taskNo = generateTaskNo();
@@ -79,6 +104,37 @@ public class DiagnoseTaskService {
     public void markFailed(String taskNo, String errorMessage) {
         getByTaskNo(taskNo);
         diagnoseTaskMapper.finishTask(taskNo, DiagnoseTaskStatus.FAILED.name(), null, errorMessage);
+    }
+
+    public boolean markInterrupted(String taskNo, String reason) {
+        return diagnoseTaskMapper.markInterruptedIfActive(taskNo, reason) > 0;
+    }
+
+    /**
+     * 硬删除诊断任务及其关联数据。RUNNING/CREATED 状态的任务可能仍在进行中（持有内存 SSE 与后台流程），
+     * 不允许删除，需先结束或失败后再删。
+     */
+    @Transactional
+    public void deleteTask(String taskNo) {
+        DiagnoseTask task = getByTaskNo(taskNo);
+        DiagnoseTaskStatus status = parseStatus(task.getStatus());
+        if (status == DiagnoseTaskStatus.RUNNING || status == DiagnoseTaskStatus.CREATED) {
+            throw new IllegalStateException("任务仍在进行中，无法删除，taskNo=" + taskNo);
+        }
+        arthasCommandRecordMapper.deleteByTaskNo(taskNo);
+        diagnoseReportMapper.deleteByTaskNo(taskNo);
+        if (diagnoseEventService != null) {
+            diagnoseEventService.deleteByTaskNo(taskNo);
+        }
+        diagnoseTaskMapper.deleteByTaskNo(taskNo);
+    }
+
+    private DiagnoseTaskStatus parseStatus(String status) {
+        try {
+            return DiagnoseTaskStatus.valueOf(status);
+        } catch (IllegalArgumentException exception) {
+            return DiagnoseTaskStatus.CREATED;
+        }
     }
 
     private String resolveDiagnoseType(String diagnoseType) {

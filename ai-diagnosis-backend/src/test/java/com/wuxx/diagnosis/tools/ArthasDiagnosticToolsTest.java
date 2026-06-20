@@ -65,7 +65,7 @@ class ArthasDiagnosticToolsTest {
                                         ArthasCommandRecordMapper recordMapper) {
         return new ArthasDiagnosticTools(
                 commandService,
-                new DiagnoseTaskService(taskMapper),
+                new DiagnoseTaskService(taskMapper, null, null),
                 new ToolCallLimiter(recordMapper)
         );
     }
@@ -130,6 +130,11 @@ class ArthasDiagnosticToolsTest {
                     .filter(record -> taskNo.equals(record.getTaskNo()))
                     .toList();
         }
+
+        @Override
+        public int deleteByTaskNo(String taskNo) {
+            return 0;
+        }
     }
 
     private static class CapturingDiagnoseTaskMapper implements DiagnoseTaskMapper {
@@ -152,9 +157,26 @@ class ArthasDiagnosticToolsTest {
         }
 
         @Override
+        public int deleteByTaskNo(String taskNo) {
+            tasks.remove(taskNo);
+            return 1;
+        }
+
+        @Override
         public int updateStatus(String taskNo, String status) {
             tasks.get(taskNo).setStatus(status);
             return 1;
+        }
+
+        @Override
+        public int markInterruptedIfActive(String taskNo, String reason) {
+            tasks.get(taskNo).setStatus(DiagnoseTaskStatus.INTERRUPTED.name());
+            return 1;
+        }
+
+        @Override
+        public java.util.List<DiagnoseTask> findActiveTasks() {
+            return java.util.List.of();
         }
 
         @Override
@@ -173,6 +195,32 @@ class ArthasDiagnosticToolsTest {
             task.setConclusion(conclusion);
             task.setErrorMessage(errorMessage);
             return 1;
+        }
+
+        @Override
+        public java.util.List<com.wuxx.diagnosis.domain.DiagnoseTaskListItem> pageQuery(
+                com.wuxx.diagnosis.domain.DiagnoseTaskQuery query, int offset, int limit) {
+            return java.util.List.of();
+        }
+
+        @Override
+        public long count(com.wuxx.diagnosis.domain.DiagnoseTaskQuery query) {
+            return 0L;
+        }
+
+        @Override
+        public java.util.Map<String, Object> countByStatus(java.time.LocalDateTime startTime) {
+            return java.util.Map.of();
+        }
+
+        @Override
+        public java.util.List<java.util.Map<String, Object>> countByType(java.time.LocalDateTime startTime) {
+            return java.util.List.of();
+        }
+
+        @Override
+        public java.util.List<java.util.Map<String, Object>> dailyTrend(java.time.LocalDateTime startTime) {
+            return java.util.List.of();
         }
     }
 }

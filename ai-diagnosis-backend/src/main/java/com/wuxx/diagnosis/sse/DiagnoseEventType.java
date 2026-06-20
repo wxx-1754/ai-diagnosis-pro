@@ -13,5 +13,6 @@ public enum DiagnoseEventType {
     REPORT_GENERATED,
     TASK_FINISHED,
     TASK_FAILED,
+    TASK_INTERRUPTED,
     HEARTBEAT
 }

@@ -45,11 +45,11 @@ public class ArthasHttpCommandExecutor implements ArthasCommandExecutor {
             byte[] responseBody = restClient.post()
                     .uri(apiUrl)
                     .headers(headers -> applyHeaders(headers, instance))
-                    .body(buildRequestBody(command))
+                    .body(buildRequestBody(command, requestNo))
                     .exchange((request, response) -> response.getBody().readAllBytes());
 
             ArthasApiResponse apiResponse = parseResponse(responseBody);
-            validateState(apiResponse);
+            validateState(apiResponse, command);
             String output = truncate(extractOutput(apiResponse), properties.getMaxOutputLength());
 
             return ArthasExecuteResponse.builder()
@@ -78,11 +78,19 @@ public class ArthasHttpCommandExecutor implements ArthasCommandExecutor {
         }
     }
 
-    private Map<String, Object> buildRequestBody(String command) {
+    private Map<String, Object> buildRequestBody(String command, String requestNo) {
         Map<String, Object> body = new HashMap<>();
         body.put("action", "exec");
+        body.put("requestId", requestNo);
         body.put("command", command);
+        body.put("execTimeout", String.valueOf(resolveExecTimeout(command)));
         return body;
+    }
+
+    private int resolveExecTimeout(String command) {
+        return command != null && command.trim().startsWith("trace ")
+                ? properties.getTraceExecTimeoutMs()
+                : properties.getExecTimeoutMs();
     }
 
     private String buildApiUrl(AppInstance instance) {
@@ -112,7 +120,7 @@ public class ArthasHttpCommandExecutor implements ArthasCommandExecutor {
         return objectMapper.readValue(text, ArthasApiResponse.class);
     }
 
-    private void validateState(ArthasApiResponse response) {
+    private void validateState(ArthasApiResponse response, String command) {
         if (response == null) {
             throw new IllegalStateException("Empty Arthas response");
         }
@@ -121,6 +129,15 @@ public class ArthasHttpCommandExecutor implements ArthasCommandExecutor {
                     ? response.getMessage()
                     : "Arthas command state is " + response.getState();
             throw new IllegalStateException(message);
+        }
+        JsonNode body = response.getBody();
+        if (body != null && body.path("timeExpired").asBoolean(false)) {
+            if (command != null && command.trim().startsWith("trace ")) {
+                throw new IllegalStateException("Trace 在 " + properties.getTraceExecTimeoutMs()
+                        + "ms 内未命中目标方法；请在采样期间实际请求目标接口后重试");
+            }
+            throw new IllegalStateException("Arthas 命令执行超过 "
+                    + properties.getExecTimeoutMs() + "ms，已自动终止");
         }
     }
 

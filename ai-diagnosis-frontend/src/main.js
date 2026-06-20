@@ -1,6 +1,9 @@
 import anime from 'animejs/lib/anime.es.js';
 import '@phosphor-icons/web/regular';
 import { createEmptyInsightSummary, extractInsightSummary } from './insight-summary.js';
+import { mountOverview } from './overview.js';
+import { mountEventDetail } from './event-detail.js';
+import { railHtml } from './rail.js';
 import './styles.css';
 
 const STREAM_EVENT_TYPES = [
@@ -15,6 +18,7 @@ const STREAM_EVENT_TYPES = [
   'REPORT_GENERATED',
   'TASK_FINISHED',
   'TASK_FAILED',
+  'TASK_INTERRUPTED',
   'HEARTBEAT'
 ];
 
@@ -30,6 +34,7 @@ const EVENT_LABELS = {
   REPORT_GENERATED: '报告生成',
   TASK_FINISHED: '诊断完成',
   TASK_FAILED: '诊断失败',
+  TASK_INTERRUPTED: '诊断中断',
   HEARTBEAT: '心跳',
   STREAM_ERROR: '连接异常',
   MESSAGE: '消息'
@@ -47,6 +52,7 @@ const EVENT_META = {
   REPORT_GENERATED: { icon: 'ph-file-text', tone: 'violet' },
   TASK_FINISHED: { icon: 'ph-seal-check', tone: 'green' },
   TASK_FAILED: { icon: 'ph-warning-octagon', tone: 'red' },
+  TASK_INTERRUPTED: { icon: 'ph-plugs', tone: 'red' },
   STREAM_ERROR: { icon: 'ph-plugs', tone: 'red' },
   MESSAGE: { icon: 'ph-activity', tone: 'neutral' }
 };
@@ -150,37 +156,12 @@ const EVENT_STAGE = {
   REPORT_GENERATED: 4,
   TASK_FINISHED: 5,
   TASK_FAILED: 5,
+  TASK_INTERRUPTED: 5,
   STREAM_ERROR: 5
 };
 
 const PASSIVE_EVENT_TYPES = new Set(['HEARTBEAT']);
-
-const PRESETS = [
-  {
-    label: 'CPU 高',
-    question: '线上订单服务 CPU 持续升高，请结合 Arthas 采样定位热点线程和可疑方法。',
-    metric: 'P95 3.21s',
-    targetClass: 'com.example.order.controller.OrderController',
-    targetMethod: 'createOrder',
-    targetUri: '/api/orders'
-  },
-  {
-    label: '接口慢',
-    question: '订单查询接口响应变慢，请分析链路耗时、线程状态和可能的慢调用来源。',
-    metric: 'P95 4.08s',
-    targetClass: 'com.example.order.controller.OrderController',
-    targetMethod: 'queryOrders',
-    targetUri: '/api/orders/search'
-  },
-  {
-    label: '线程阻塞',
-    question: '支付回调偶发卡住，请检查阻塞线程、锁等待和业务调用栈。',
-    metric: 'Block 37s',
-    targetClass: 'com.example.pay.controller.CallbackController',
-    targetMethod: 'callback',
-    targetUri: '/api/pay/callback'
-  }
-];
+const CURRENT_TASK_STORAGE_KEY = 'ai-diagnosis.currentTaskNo';
 
 const DEMO_EVENTS = [
   ['TASK_CREATED', 'Agent 任务已创建，开始接管现场。', { appId: 'order-service', env: 'prod' }],
@@ -220,23 +201,25 @@ const state = {
   optionsError: '',
   userId: 'admin',
   mode: 'TOOL_CALLING',
-  question: PRESETS[0].question,
-  targetClass: PRESETS[0].targetClass,
-  targetMethod: PRESETS[0].targetMethod,
-  targetUri: PRESETS[0].targetUri,
-  symptomMetric: PRESETS[0].metric,
+  question: '',
+  targetClass: '',
+  targetMethod: '',
+  targetUri: '',
+  symptomMetric: '',
   activeStage: 0,
   completedStages: new Set(),
   doneRunbook: new Set(),
   activeRunbook: 0,
-  stageEvidence: createInitialStageEvidence({
-    symptomMetric: PRESETS[0].metric,
-    targetUri: PRESETS[0].targetUri
-  }),
+  stageEvidence: createInitialStageEvidence({}),
   events: [],
   commandRecords: [],
   reportMarkdown: '',
   insightSummary: createEmptyInsightSummary(),
+  resumeDiagnoseType: '',
+  observationState: '',
+  restartAllowed: false,
+  lastEventId: 0,
+  seenEventIds: new Set(),
   runbookTiming: createInitialRunbookTiming(),
   lastResponse: null,
   eventSource: null,
@@ -245,27 +228,27 @@ const state = {
   connection: 'READY'
 };
 
-document.querySelector('#app').innerHTML = `
+function studioShell() {
+  return `
   <div class="diagnosis-studio">
-    <aside class="side-rail" aria-label="主导航">
-      <a class="mark" href="/" aria-label="AI Arthas Diagnosis">A</a>
-      <nav class="rail-nav">
-        <button class="rail-button is-active" type="button" data-jump="map" aria-label="因果图谱">图</button>
-        <button class="rail-button" type="button" data-jump="result" aria-label="根因与建议">因</button>
-        <button class="rail-button" type="button" data-jump="plan" aria-label="执行计划">计</button>
-      </nav>
-      <div class="rail-bottom">
-        <span class="rail-state" data-connection-dot></span>
-        <button class="rail-button" type="button" data-stop-stream aria-label="停止流">停</button>
+    ${railHtml('studio', { bottom: `
+      <div class="rail-status">
+        <span class="rail-state" data-connection-dot aria-hidden="true"></span>
+        <span class="rail-status-text">实时事件流</span>
       </div>
-    </aside>
+      <button class="rail-stop" type="button" data-stop-stream aria-label="停止流" title="停止流">
+        <i class="ph ph-stop" aria-hidden="true"></i>
+        <span>停止流</span>
+      </button>
+    ` })}
 
     <div class="workspace">
       <header class="topbar reveal">
         <div class="title-block">
           <span>AI + Arthas</span>
-          <h1>性能因果图谱</h1>
-          <p>Causal Map Studio</p>
+          <h1>因果诊断</h1>
+          <p>Causal Map Studio · 从症状到根因的实时路径</p>
+          <div class="resume-badge" data-resume-badge hidden></div>
         </div>
 
         <div class="top-fields">
@@ -309,6 +292,7 @@ document.querySelector('#app').innerHTML = `
             </div>
             <div class="toolbar-actions">
               <button class="primary-button" type="button" data-start-agent>启动诊断</button>
+              <button class="primary-button" type="button" data-restart-diagnosis hidden>重新诊断</button>
               <button class="secondary-button" type="button" data-quick-ai>AI 快速分析</button>
               <button class="ghost-button" type="button" data-demo-flow>演示流</button>
             </div>
@@ -317,30 +301,22 @@ document.querySelector('#app').innerHTML = `
           <div class="incident-card">
             <div class="incident-copy">
               <span>异常描述</span>
-              <textarea id="question" rows="3">${escapeHtml(state.question)}</textarea>
-            </div>
-            <div class="preset-row">
-              ${PRESETS.map((preset, index) => `
-                <button class="preset-button ${index === 0 ? 'is-active' : ''}" type="button" data-preset="${index}">
-                  <strong>${escapeHtml(preset.label)}</strong>
-                  <span>${escapeHtml(preset.metric)}</span>
-                </button>
-              `).join('')}
+              <textarea id="question" rows="3" placeholder="描述线上异常现象，例如：CPU 持续升高 / 接口响应变慢 / 线程偶发卡住……">${escapeHtml(state.question)}</textarea>
             </div>
             <details class="target-details">
               <summary>目标范围</summary>
               <div class="target-grid">
                 <label>
                   <span>URI</span>
-                  <input id="targetUri" value="${escapeHtml(state.targetUri)}" autocomplete="off" />
+                  <input id="targetUri" value="${escapeHtml(state.targetUri)}" autocomplete="off" placeholder="可选，如 /api/orders" />
                 </label>
                 <label>
                   <span>Class</span>
-                  <input id="targetClass" value="${escapeHtml(state.targetClass)}" autocomplete="off" />
+                  <input id="targetClass" value="${escapeHtml(state.targetClass)}" autocomplete="off" placeholder="可选，全限定类名" />
                 </label>
                 <label>
                   <span>Method</span>
-                  <input id="targetMethod" value="${escapeHtml(state.targetMethod)}" autocomplete="off" />
+                  <input id="targetMethod" value="${escapeHtml(state.targetMethod)}" autocomplete="off" placeholder="可选，方法名" />
                 </label>
               </div>
             </details>
@@ -465,38 +441,137 @@ document.querySelector('#app').innerHTML = `
     </div>
   </div>
 `;
+}
 
 const refs = {
-  appId: document.querySelector('#appId'),
-  env: document.querySelector('#env'),
-  question: document.querySelector('#question'),
-  targetUri: document.querySelector('#targetUri'),
-  targetClass: document.querySelector('#targetClass'),
-  targetMethod: document.querySelector('#targetMethod'),
-  startAgent: document.querySelector('[data-start-agent]'),
-  quickAi: document.querySelector('[data-quick-ai]'),
-  demoFlow: document.querySelector('[data-demo-flow]'),
-  stopStream: document.querySelector('[data-stop-stream]'),
-  downloadReport: document.querySelector('[data-download-report]')
+  appId: null,
+  env: null,
+  question: null,
+  targetUri: null,
+  targetClass: null,
+  targetMethod: null,
+  startAgent: null,
+  restartDiagnosis: null,
+  quickAi: null,
+  demoFlow: null,
+  stopStream: null,
+  downloadReport: null
 };
 
-bindEvents();
-renderAll();
-runIntroAnimation();
-loadInstanceOptions();
+function populateRefs() {
+  refs.appId = document.querySelector('#appId');
+  refs.env = document.querySelector('#env');
+  refs.question = document.querySelector('#question');
+  refs.targetUri = document.querySelector('#targetUri');
+  refs.targetClass = document.querySelector('#targetClass');
+  refs.targetMethod = document.querySelector('#targetMethod');
+  refs.startAgent = document.querySelector('[data-start-agent]');
+  refs.restartDiagnosis = document.querySelector('[data-restart-diagnosis]');
+  refs.quickAi = document.querySelector('[data-quick-ai]');
+  refs.demoFlow = document.querySelector('[data-demo-flow]');
+  refs.stopStream = document.querySelector('[data-stop-stream]');
+  refs.downloadReport = document.querySelector('[data-download-report]');
+}
+
+function mountStudio(resumeTaskNo) {
+  document.querySelector('#app').innerHTML = studioShell();
+  populateRefs();
+  bindEvents();
+  renderAll();
+  runIntroAnimation();
+  // 接续观察与实例选项加载并行执行，互不阻塞；resumeTask 内部会在选项就绪后回填服务/环境。
+  loadInstanceOptions();
+  if (resumeTaskNo) {
+    resumeTask(resumeTaskNo);
+  }
+}
+
+// 接续观察：使用持久化诊断事件恢复真实现场；只有仍活跃的任务才连接 SSE。
+async function resumeTask(taskNo) {
+  try {
+    resetRun();
+    setTaskNo(taskNo);
+    setConnection('RUNNING', '回放诊断现场');
+    renderResumeBadge();
+
+    const detail = await requestJson(`${state.apiBase}/api/diagnose/tasks/${encodeURIComponent(taskNo)}/detail`);
+    const task = detail?.task || {};
+    state.commandRecords = detail?.commandRecords || [];
+    state.observationState = detail?.observationState || '';
+    state.restartAllowed = Boolean(detail?.restartAllowed);
+    state.lastEventId = Number(detail?.lastEventId) || 0;
+
+    if (task.question) state.question = task.question;
+    if (task.targetUri) state.targetUri = task.targetUri;
+    if (task.targetClass) state.targetClass = task.targetClass;
+    if (task.targetMethod) state.targetMethod = task.targetMethod;
+    state.resumeDiagnoseType = task.diagnoseType || '';
+    if (task.appId) state.appId = task.appId;
+    if (task.env) state.env = task.env;
+
+    if (refs.question) refs.question.value = state.question;
+    if (refs.targetUri) refs.targetUri.value = state.targetUri;
+    if (refs.targetClass) refs.targetClass.value = state.targetClass;
+    if (refs.targetMethod) refs.targetMethod.value = state.targetMethod;
+
+    if (state.instanceOptions.length) {
+      renderServiceOptions();
+    }
+
+    replayPersistedEvents(detail?.events || []);
+    renderMapState();
+    renderResumeBadge();
+    updateActionAvailability();
+
+    if (state.observationState === 'ACTIVE') {
+      rememberCurrentTask(taskNo);
+      connectStream('', state.lastEventId);
+      setConnection('RUNNING', '已接续现场，监听实时事件');
+    } else if (state.observationState === 'INTERRUPTED') {
+      forgetCurrentTask();
+      setConnection('ERROR', '诊断已中断，后台执行已不存在');
+    } else {
+      forgetCurrentTask();
+      if (task.status === 'FINISHED') {
+        await refreshReport();
+      }
+      setConnection(task.status === 'FAILED' ? 'ERROR' : 'SUCCESS', task.status === 'FAILED' ? '诊断已失败' : '诊断已完成');
+    }
+  } catch (error) {
+    console.error('[resumeTask] 回放诊断现场失败', error);
+    setConnection('ERROR', error.message || '回放失败');
+    showNotice(error.message || '回放诊断现场失败');
+  }
+}
+
+function renderResumeBadge() {
+  const badge = document.querySelector('[data-resume-badge]');
+  if (!badge) return;
+  if (!state.taskNo) {
+    badge.hidden = true;
+    badge.innerHTML = '';
+    return;
+  }
+  const typeLabel = formatDiagnoseType(state.resumeDiagnoseType);
+  const interrupted = state.observationState === 'INTERRUPTED';
+  badge.hidden = false;
+  badge.innerHTML = `
+    <i class="ph ${interrupted ? 'ph-plugs' : 'ph-crosshair'}" aria-hidden="true"></i>
+    <span>${interrupted ? '已中断' : '接续'} ${escapeHtml(state.taskNo)}</span>
+    ${typeLabel ? `<span class="resume-badge-type">${escapeHtml(typeLabel)}</span>` : ''}
+  `;
+}
+
+function replayPersistedEvents(events) {
+  events.forEach((event) => pushEvent(event));
+}
+
+// 必须在 setupRouter() 之前声明，否则 handleRoute 访问时处于 TDZ。
+let activeView = null;
+
+setupRouter();
 
 function bindEvents() {
-  document.querySelectorAll('[data-jump]').forEach((button) => {
-    button.addEventListener('click', () => {
-      document.querySelectorAll('[data-jump]').forEach((item) => item.classList.toggle('is-active', item === button));
-      document.getElementById(button.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-  });
-
-  document.querySelectorAll('[data-preset]').forEach((button) => {
-    button.addEventListener('click', () => applyPreset(Number(button.dataset.preset), button));
-  });
-
   refs.appId.addEventListener('change', () => {
     state.appId = refs.appId.value;
     renderEnvironmentOptions();
@@ -510,6 +585,7 @@ function bindEvents() {
   });
 
   refs.startAgent.addEventListener('click', startAgentDiagnosis);
+  refs.restartDiagnosis.addEventListener('click', restartDiagnosis);
   refs.quickAi.addEventListener('click', runQuickAi);
   refs.demoFlow.addEventListener('click', playDemoFlow);
   refs.stopStream.addEventListener('click', () => closeLiveSources(true));
@@ -597,29 +673,6 @@ function renderEnvironmentOptions() {
   updateActionAvailability();
 }
 
-function applyPreset(index, button) {
-  const preset = PRESETS[index] || PRESETS[0];
-  state.question = preset.question;
-  state.targetClass = preset.targetClass;
-  state.targetMethod = preset.targetMethod;
-  state.targetUri = preset.targetUri;
-  state.symptomMetric = preset.metric;
-
-  refs.question.value = state.question;
-  refs.targetClass.value = state.targetClass;
-  refs.targetMethod.value = state.targetMethod;
-  refs.targetUri.value = state.targetUri;
-
-  document.querySelectorAll('[data-preset]').forEach((item) => item.classList.toggle('is-active', item === button));
-  state.stageEvidence[0] = {
-    primary: preset.metric,
-    detail: preset.targetUri,
-    eventType: 'TASK_CREATED'
-  };
-  renderMapState();
-  animatePress(button);
-}
-
 function readInputs() {
   state.appId = refs.appId.value;
   state.env = refs.env.value;
@@ -649,15 +702,8 @@ async function startAgentDiagnosis() {
       })
     });
 
-    setTaskNo(response.taskNo);
-    pushEvent({
-      taskNo: response.taskNo,
-      eventType: 'TASK_CREATED',
-      message: '诊断任务已创建，正在等待 Agent 事件流。',
-      success: true,
-      time: new Date().toISOString()
-    });
-    connectStream(response.streamUrl);
+    setTaskNo(response.taskNo, { persistInRoute: true, remember: true });
+    connectStream(response.streamUrl, 0);
     renderResponse(response);
     return response;
   });
@@ -723,13 +769,19 @@ function playDemoFlow() {
   }, 720);
 }
 
-function connectStream(streamUrl) {
+function connectStream(streamUrl, afterEventId = state.lastEventId) {
   if (!state.taskNo) return;
 
-  const url = resolveStreamUrl(streamUrl);
+  const url = appendAfterEventId(resolveStreamUrl(streamUrl), afterEventId);
   const source = new EventSource(url);
   state.eventSource = source;
-  setConnection('RUNNING', 'SSE 已连接');
+  setConnection('RUNNING', '正在连接 SSE');
+
+  source.onopen = () => {
+    if (state.eventSource === source) {
+      setConnection('RUNNING', 'SSE 已连接');
+    }
+  };
 
   STREAM_EVENT_TYPES.forEach((eventType) => {
     source.addEventListener(eventType, (event) => handleSseEvent(eventType, event));
@@ -738,14 +790,7 @@ function connectStream(streamUrl) {
   source.onmessage = (event) => handleSseEvent('MESSAGE', event);
   source.onerror = () => {
     if (state.eventSource !== source) return;
-    pushEvent({
-      eventType: 'STREAM_ERROR',
-      message: 'SSE 连接异常或已关闭。',
-      success: false,
-      time: new Date().toISOString()
-    });
-    closeLiveSources(false);
-    setConnection('ERROR', 'SSE 已断开');
+    setConnection('RUNNING', 'SSE 连接中断，正在重连');
   };
 }
 
@@ -753,6 +798,7 @@ function handleSseEvent(eventType, event) {
   const payload = safeJsonParse(event.data || '{}');
   const eventPayload = {
     ...payload,
+    id: Number(payload.id || event.lastEventId) || undefined,
     eventType: payload.eventType || eventType,
     time: payload.time || new Date().toISOString()
   };
@@ -771,20 +817,38 @@ function handleSseEvent(eventType, event) {
   }
 
   if (eventPayload.eventType === 'TASK_FINISHED') {
+    forgetCurrentTask();
     closeLiveSources(false);
     setConnection('SUCCESS', '诊断完成');
     refreshTaskDetail({ silent: true });
   }
 
   if (eventPayload.eventType === 'TASK_FAILED') {
+    forgetCurrentTask();
     closeLiveSources(false);
     setConnection('ERROR', '诊断失败');
     refreshTaskDetail({ silent: true });
   }
+
+  if (eventPayload.eventType === 'TASK_INTERRUPTED') {
+    forgetCurrentTask();
+    state.observationState = 'INTERRUPTED';
+    state.restartAllowed = true;
+    closeLiveSources(false);
+    updateActionAvailability();
+    setConnection('ERROR', '诊断已中断，后台执行已不存在');
+  }
 }
 
 function pushEvent(event) {
+  const eventId = Number(event.id) || 0;
+  if (eventId && state.seenEventIds.has(eventId)) return;
+  if (eventId) {
+    state.seenEventIds.add(eventId);
+    state.lastEventId = Math.max(state.lastEventId, eventId);
+  }
   const normalized = {
+    id: eventId || undefined,
     taskNo: event.taskNo || state.taskNo,
     eventType: event.eventType || 'MESSAGE',
     message: event.message || '',
@@ -1072,9 +1136,30 @@ function renderResponse(response) {
   state.lastResponse = response;
 }
 
-function setTaskNo(taskNo) {
+function setTaskNo(taskNo, { persistInRoute = false, remember = false } = {}) {
   state.taskNo = taskNo || '';
+  if (remember && state.taskNo) {
+    rememberCurrentTask(state.taskNo);
+  }
+  if (persistInRoute && state.taskNo) {
+    const route = `#/studio?taskNo=${encodeURIComponent(state.taskNo)}`;
+    window.history.replaceState(window.history.state, '', route);
+  }
   renderProgress();
+}
+
+function rememberCurrentTask(taskNo) {
+  if (taskNo) {
+    window.sessionStorage.setItem(CURRENT_TASK_STORAGE_KEY, taskNo);
+  }
+}
+
+function forgetCurrentTask() {
+  window.sessionStorage.removeItem(CURRENT_TASK_STORAGE_KEY);
+  const raw = location.hash.replace(/^#/, '');
+  if (raw.startsWith('/studio?') || raw.startsWith('studio?')) {
+    window.history.replaceState(window.history.state, '', '#/studio');
+  }
 }
 
 function setLoading(loading, label = '') {
@@ -1085,8 +1170,16 @@ function setLoading(loading, label = '') {
 
 function updateActionAvailability() {
   const targetUnavailable = state.optionsLoading || state.instanceOptions.length === 0 || !state.appId || !state.env;
-  refs.startAgent.disabled = state.loading || targetUnavailable;
-  refs.quickAi.disabled = state.loading || targetUnavailable;
+  refs.startAgent.hidden = state.restartAllowed;
+  refs.restartDiagnosis.hidden = !state.restartAllowed;
+  refs.restartDiagnosis.disabled = state.loading || !state.restartAllowed;
+  refs.startAgent.disabled = state.loading || targetUnavailable || state.restartAllowed;
+  refs.quickAi.disabled = state.loading || targetUnavailable || state.restartAllowed;
+  refs.appId.disabled = state.restartAllowed || state.optionsLoading || state.instanceOptions.length === 0;
+  refs.env.disabled = state.restartAllowed || state.optionsLoading || !state.env;
+  [refs.question, refs.targetUri, refs.targetClass, refs.targetMethod].forEach((input) => {
+    input.disabled = state.restartAllowed;
+  });
   refs.demoFlow.disabled = state.loading;
   refs.downloadReport.disabled = state.loading || !state.reportMarkdown;
 }
@@ -1099,11 +1192,28 @@ function setConnection(connection, text) {
 
 function resetRun() {
   closeLiveSources(false);
+  resetDiagnosisState();
+  renderAll();
+  renderResumeBadge();
+}
+
+function resetDiagnosisState({ clearInputs = false } = {}) {
+  if (clearInputs) {
+    state.question = '';
+    state.targetUri = '';
+    state.targetClass = '';
+    state.targetMethod = '';
+  }
   state.taskNo = '';
   state.events = [];
   state.commandRecords = [];
   state.reportMarkdown = '';
   state.insightSummary = createEmptyInsightSummary();
+  state.resumeDiagnoseType = '';
+  state.observationState = '';
+  state.restartAllowed = false;
+  state.lastEventId = 0;
+  state.seenEventIds = new Set();
   state.runbookTiming = createInitialRunbookTiming();
   state.completedStages = new Set();
   state.doneRunbook = new Set();
@@ -1113,7 +1223,6 @@ function resetRun() {
     symptomMetric: state.symptomMetric,
     targetUri: state.targetUri
   });
-  renderAll();
 }
 
 function closeLiveSources(recordEvent) {
@@ -1145,6 +1254,23 @@ function resolveStreamUrl(streamUrl) {
   if (streamUrl?.startsWith('http')) return streamUrl;
   if (streamUrl?.startsWith('/')) return `${state.apiBase}${streamUrl}`;
   return `${state.apiBase}/api/diagnose/tasks/${encodeURIComponent(state.taskNo)}/stream`;
+}
+
+function appendAfterEventId(url, afterEventId) {
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}afterEventId=${encodeURIComponent(Math.max(0, Number(afterEventId) || 0))}`;
+}
+
+async function restartDiagnosis() {
+  if (!state.taskNo || !state.restartAllowed) return;
+  await runAction('重新诊断', async () => {
+    const response = await requestJson(
+      `${state.apiBase}/api/agent/diagnose/${encodeURIComponent(state.taskNo)}/restart`,
+      { method: 'POST' }
+    );
+    location.hash = `#/studio?taskNo=${encodeURIComponent(response.taskNo)}`;
+    return response;
+  });
 }
 
 function normalizeApiBase(value) {
@@ -1245,8 +1371,8 @@ function formatRunbookDuration(timing) {
 function createInitialStageEvidence(seed = {}) {
   return [
     {
-      primary: seed.symptomMetric || PRESETS[0].metric,
-      detail: seed.targetUri || PRESETS[0].targetUri,
+      primary: seed.symptomMetric || '待填写',
+      detail: seed.targetUri || '描述异常现象后开始诊断',
       eventType: 'TASK_CREATED'
     },
     { primary: '等待识别', detail: 'AI 分类器', eventType: 'INTENT_CLASSIFYING' },
@@ -1338,7 +1464,7 @@ function deriveStageEvidence(event) {
     };
   }
 
-  if (event.eventType === 'TASK_FAILED' || event.eventType === 'STREAM_ERROR') {
+  if (event.eventType === 'TASK_FAILED' || event.eventType === 'TASK_INTERRUPTED' || event.eventType === 'STREAM_ERROR') {
     return {
       primary: '诊断链路异常',
       detail: compactEvidence(message, 42),
@@ -1538,4 +1664,79 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function setupRouter() {
+  window.addEventListener('hashchange', handleRoute);
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-route]');
+    if (!button) return;
+    let route = button.getAttribute('data-route');
+    if (route === '/studio') {
+      const startsNewDiagnosis = button.hasAttribute('data-new-diagnosis');
+      if (startsNewDiagnosis) {
+        forgetCurrentTask();
+        resetDiagnosisState({ clearInputs: true });
+      }
+      const currentTaskNo = startsNewDiagnosis
+        ? ''
+        : window.sessionStorage.getItem(CURRENT_TASK_STORAGE_KEY);
+      if (currentTaskNo) {
+        route = `/studio?taskNo=${encodeURIComponent(currentTaskNo)}`;
+      } else if (!startsNewDiagnosis) {
+        resetDiagnosisState({ clearInputs: true });
+      }
+    }
+    if (route && location.hash !== `#${route}`) {
+      location.hash = route;
+    }
+  });
+  handleRoute();
+}
+
+function handleRoute() {
+  const raw = location.hash.replace(/^#/, '');
+  const [path, query = ''] = raw.split('?');
+  const segments = path.split('/').filter(Boolean);
+  const root = segments[0] || 'studio';
+
+  // 离开诊断现场时释放 SSE 与演示流；停留在现场则保持不动，避免中断进行中的诊断。
+  if (root !== 'studio' && activeView === 'studio') {
+    closeLiveSources(false);
+  }
+
+  const app = document.querySelector('#app');
+  if (root === 'overview') {
+    const taskNo = segments[1];
+    if (taskNo) {
+      mountEventDetail(app, {
+        taskNo: decodeURIComponent(taskNo),
+        apiBase: state.apiBase,
+        query
+      });
+    } else {
+      mountOverview(app, { apiBase: state.apiBase, query });
+    }
+    activeView = 'overview';
+    window.scrollTo({ top: 0 });
+    return;
+  }
+
+  if (activeView === 'studio') {
+    // 已在现场：若带 taskNo 且与当前任务不同，则切换到该任务接续观察。
+    const resumeTaskNo = parseStudioTaskNo(query);
+    if (resumeTaskNo && resumeTaskNo !== state.taskNo) {
+      resumeTask(resumeTaskNo);
+    }
+    return;
+  }
+  mountStudio(parseStudioTaskNo(query));
+  activeView = 'studio';
+  window.scrollTo({ top: 0 });
+}
+
+function parseStudioTaskNo(query) {
+  const params = new URLSearchParams(query);
+  const taskNo = params.get('taskNo');
+  return taskNo ? decodeURIComponent(taskNo) : '';
 }
