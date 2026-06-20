@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.Executor;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wuxx.diagnosis.config.DiagnosisAiProperties;
 import com.wuxx.diagnosis.domain.ArthasCommandRecord;
 import com.wuxx.diagnosis.domain.DiagnoseRunResponse;
@@ -14,6 +16,8 @@ import com.wuxx.diagnosis.domain.DiagnoseTaskStatus;
 import com.wuxx.diagnosis.domain.DiagnoseType;
 import com.wuxx.diagnosis.domain.ai.AgentDiagnoseStartRequest;
 import com.wuxx.diagnosis.domain.ai.DiagnoseIntentResult;
+import com.wuxx.diagnosis.domain.ai.DiagnosisInsightSummary;
+import com.wuxx.diagnosis.domain.ai.DiagnosisReportPayload;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
 import com.wuxx.diagnosis.service.DiagnoseReportService;
 import com.wuxx.diagnosis.service.DiagnoseTaskService;
@@ -50,6 +54,10 @@ public class AgentDiagnoseAsyncService {
 
     private final DiagnosisAiProperties properties;
 
+    private final DiagnosisInsightSummarizer insightSummarizer;
+
+    private final ObjectMapper objectMapper;
+
     public AgentDiagnoseAsyncService(DiagnoseTaskService diagnoseTaskService,
                                      DiagnoseIntentClassifier intentClassifier,
                                      HybridDiagnosisExecutor hybridDiagnosisExecutor,
@@ -58,7 +66,9 @@ public class AgentDiagnoseAsyncService {
                                      DiagnosisReportGenerator reportGenerator,
                                      DiagnoseReportService diagnoseReportService,
                                      ArthasCommandRecordMapper commandRecordMapper,
-                                     DiagnosisAiProperties properties) {
+                                     DiagnosisAiProperties properties,
+                                     DiagnosisInsightSummarizer insightSummarizer,
+                                     ObjectMapper objectMapper) {
         this.diagnoseTaskService = diagnoseTaskService;
         this.intentClassifier = intentClassifier;
         this.hybridDiagnosisExecutor = hybridDiagnosisExecutor;
@@ -68,6 +78,8 @@ public class AgentDiagnoseAsyncService {
         this.diagnoseReportService = diagnoseReportService;
         this.commandRecordMapper = commandRecordMapper;
         this.properties = properties;
+        this.insightSummarizer = insightSummarizer;
+        this.objectMapper = objectMapper;
     }
 
     public String start(AgentDiagnoseStartRequest request) {
@@ -106,19 +118,24 @@ public class AgentDiagnoseAsyncService {
             DiagnoseTask task = diagnoseTaskService.getByTaskNo(taskNo);
             List<ArthasCommandRecord> records = commandRecordMapper.findByTaskNo(taskNo);
             String reportMarkdown = generateReport(task, records, runResponse);
-            String summary = extractSummary(reportMarkdown);
+            DiagnosisInsightSummary insightSummary = insightSummarizer.summarize(reportMarkdown);
+            String summary = insightSummary.getRootCause();
             diagnoseReportService.saveOrUpdate(
                     taskNo,
                     "Java 应用智能诊断报告",
                     reportMarkdown,
-                    null,
+                    serializeInsight(insightSummary),
                     properties.getChatModel(),
                     properties.getPromptVersion()
             );
             diagnoseTaskService.markFinished(taskNo, summary);
 
-            send(taskNo, DiagnoseEventType.REPORT_GENERATED, "AI 诊断报告已生成", reportMarkdown);
-            send(taskNo, DiagnoseEventType.TASK_FINISHED, "诊断完成", reportMarkdown);
+            DiagnosisReportPayload payload = DiagnosisReportPayload.builder()
+                    .reportMarkdown(reportMarkdown)
+                    .insightSummary(insightSummary)
+                    .build();
+            send(taskNo, DiagnoseEventType.REPORT_GENERATED, "AI 诊断报告与摘要已生成", payload);
+            send(taskNo, DiagnoseEventType.TASK_FINISHED, "诊断完成", payload);
         } catch (Exception exception) {
             log.error("Agent diagnose async failed, taskNo={}", taskNo, exception);
             diagnoseTaskService.markFailed(taskNo, exception.getMessage());
@@ -174,14 +191,32 @@ public class AgentDiagnoseAsyncService {
                     ## 2. 诊断类型
                     %s
 
-                    ## 3. 结论摘要
+                    ## 3. 执行步骤
+                    已完成当前诊断类型对应的基础采样流程。
+
+                    ## 4. 关键发现
                     %s
 
-                    ## 4. 风险提示
+                    ## 5. 根因分析
+                    当前 AI 报告生成失败，只能提供基础诊断结论；根因仍需结合命令审计记录进一步确认。
+
+                    ## 6. 预期效果
+                    暂无可靠估算，需在修复后通过压测或同口径监控验证。
+
+                    ## 7. 推荐操作
+                    1. 查看本任务的 Arthas 命令审计记录，确认关键线程、方法或资源指标。
+                    2. 在测试或灰度环境实施低风险修复，并记录变更前基线。
+                    3. 使用相同流量和指标口径验证修复效果，未达预期时回滚并补充证据。
+
+                    ## 8. 风险提示
                     AI 报告生成失败，当前内容来自诊断流程基础结论。请结合命令审计记录进一步确认。
+
+                    ## 9. 结论摘要
+                    %s
                     """.formatted(
                     nullToDefault(task.getQuestion(), "未提供问题描述"),
                     nullToDefault(task.getDiagnoseType(), DiagnoseType.UNKNOWN.name()),
+                    nullToDefault(runResponse.getConclusion(), "诊断数据采集完成，但缺少明确结论。"),
                     nullToDefault(runResponse.getConclusion(), "诊断数据采集完成，但缺少明确结论。")
             );
         }
@@ -220,17 +255,13 @@ public class AgentDiagnoseAsyncService {
         return StringUtils.hasText(first) ? first : second;
     }
 
-    private String extractSummary(String markdown) {
-        if (!StringUtils.hasText(markdown)) {
-            return "AI 已生成诊断报告。";
+    private String serializeInsight(DiagnosisInsightSummary insightSummary) {
+        try {
+            return objectMapper.writeValueAsString(insightSummary);
+        } catch (JsonProcessingException exception) {
+            log.warn("Serialize diagnosis insight failed, message={}", exception.getMessage());
+            return null;
         }
-
-        int index = markdown.indexOf("## 9. 结论摘要");
-        if (index < 0) {
-            index = markdown.indexOf("## 3. 结论摘要");
-        }
-        String summary = index >= 0 ? markdown.substring(index) : markdown;
-        return summary.length() > 1000 ? summary.substring(0, 1000) : summary;
     }
 
     private void send(String taskNo, DiagnoseEventType eventType, String message, Object data) {

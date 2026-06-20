@@ -21,4 +21,12 @@ http://127.0.0.1:5173
 http://localhost:9001
 ```
 
-如果后端端口或地址不同，可以在页面的「后端地址」输入框里修改。
+如果后端端口或地址不同，请创建 `.env.local`：
+
+```text
+VITE_API_BASE_URL=http://localhost:9001
+```
+
+然后运行 `npm run dev`。
+
+顶部的服务与环境选择项由后端 `/api/app-instances/options` 接口从 `app_instance` 表加载。

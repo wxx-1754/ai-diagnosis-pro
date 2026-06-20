@@ -2,6 +2,8 @@ package com.wuxx.diagnosis.service.ai;
 
 import java.util.List;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wuxx.diagnosis.config.DiagnosisAiProperties;
 import com.wuxx.diagnosis.domain.ArthasCommandRecord;
 import com.wuxx.diagnosis.domain.DiagnoseRunResponse;
@@ -13,6 +15,7 @@ import com.wuxx.diagnosis.domain.DiagnoseType;
 import com.wuxx.diagnosis.domain.ai.AiDiagnoseRequest;
 import com.wuxx.diagnosis.domain.ai.AiDiagnoseResponse;
 import com.wuxx.diagnosis.domain.ai.DiagnoseIntentResult;
+import com.wuxx.diagnosis.domain.ai.DiagnosisInsightSummary;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
 import com.wuxx.diagnosis.service.DiagnoseReportService;
 import com.wuxx.diagnosis.service.DiagnoseTaskService;
@@ -40,6 +43,10 @@ public class AiDiagnosisOrchestrator {
     private final DiagnosisReportGenerator reportGenerator;
 
     private final DiagnoseReportService diagnoseReportService;
+
+    private final DiagnosisInsightSummarizer insightSummarizer;
+
+    private final ObjectMapper objectMapper;
 
     private final DiagnosisAiProperties properties;
 
@@ -81,12 +88,13 @@ public class AiDiagnosisOrchestrator {
         try {
             List<ArthasCommandRecord> records = arthasCommandRecordMapper.findByTaskNo(task.getTaskNo());
             String reportMarkdown = reportGenerator.generateMarkdownReport(task, records);
-            String summary = extractSummary(reportMarkdown);
+            DiagnosisInsightSummary insightSummary = insightSummarizer.summarize(reportMarkdown);
+            String summary = insightSummary.getRootCause();
             diagnoseReportService.saveOrUpdate(
                     task.getTaskNo(),
                     "Java 应用智能诊断报告",
                     reportMarkdown,
-                    null,
+                    serializeInsight(insightSummary),
                     properties.getChatModel(),
                     properties.getPromptVersion()
             );
@@ -98,6 +106,7 @@ public class AiDiagnosisOrchestrator {
                     .status(DiagnoseTaskStatus.FINISHED.name())
                     .reportMarkdown(reportMarkdown)
                     .conclusion(summary)
+                    .insightSummary(insightSummary)
                     .build();
         } catch (Exception exception) {
             log.error("AI report generation failed, taskNo={}", task.getTaskNo(), exception);
@@ -118,12 +127,13 @@ public class AiDiagnosisOrchestrator {
 
         List<ArthasCommandRecord> records = arthasCommandRecordMapper.findByTaskNo(taskNo);
         String reportMarkdown = reportGenerator.generateMarkdownReport(task, records);
-        String summary = extractSummary(reportMarkdown);
+        DiagnosisInsightSummary insightSummary = insightSummarizer.summarize(reportMarkdown);
+        String summary = insightSummary.getRootCause();
         diagnoseReportService.saveOrUpdate(
                 task.getTaskNo(),
                 "Java 应用智能诊断报告",
                 reportMarkdown,
-                null,
+                serializeInsight(insightSummary),
                 properties.getChatModel(),
                 properties.getPromptVersion()
         );
@@ -135,6 +145,7 @@ public class AiDiagnosisOrchestrator {
                 .status(DiagnoseTaskStatus.FINISHED.name())
                 .reportMarkdown(reportMarkdown)
                 .conclusion(summary)
+                .insightSummary(insightSummary)
                 .build();
     }
 
@@ -187,14 +198,13 @@ public class AiDiagnosisOrchestrator {
         return StringUtils.hasText(first) ? first : second;
     }
 
-    private String extractSummary(String markdown) {
-        if (!StringUtils.hasText(markdown)) {
-            return "AI 已生成诊断报告。";
+    private String serializeInsight(DiagnosisInsightSummary insightSummary) {
+        try {
+            return objectMapper.writeValueAsString(insightSummary);
+        } catch (JsonProcessingException exception) {
+            log.warn("Serialize diagnosis insight failed, message={}", exception.getMessage());
+            return null;
         }
-
-        int index = markdown.indexOf("## 9. 结论摘要");
-        String summary = index >= 0 ? markdown.substring(index) : markdown;
-        return summary.length() > 1000 ? summary.substring(0, 1000) : summary;
     }
 
     private String nullToDefault(String value, String defaultValue) {

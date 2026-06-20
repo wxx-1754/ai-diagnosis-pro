@@ -20,6 +20,7 @@ import com.wuxx.diagnosis.domain.DiagnoseType;
 import com.wuxx.diagnosis.domain.ai.AiDiagnoseRequest;
 import com.wuxx.diagnosis.domain.ai.AiDiagnoseResponse;
 import com.wuxx.diagnosis.domain.ai.DiagnoseIntentResult;
+import com.wuxx.diagnosis.domain.ai.DiagnosisInsightSummary;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
 import com.wuxx.diagnosis.mapper.DiagnoseReportMapper;
 import com.wuxx.diagnosis.mapper.DiagnoseTaskMapper;
@@ -59,11 +60,14 @@ class AiDiagnosisOrchestratorTest {
         assertThat(response.getStatus()).isEqualTo(DiagnoseTaskStatus.FINISHED.name());
         assertThat(response.getDiagnoseType()).isEqualTo(DiagnoseType.HIGH_CPU.name());
         assertThat(response.getReportMarkdown()).contains("Java 应用智能诊断报告");
-        assertThat(response.getConclusion()).contains("CPU 高诊断证据充分");
+        assertThat(response.getConclusion()).isEqualTo("热点线程导致 CPU 持续升高。");
+        assertThat(response.getInsightSummary().getSpecificReasons()).hasSize(2);
+        assertThat(response.getInsightSummary().getRecommendedActions()).hasSize(2);
         assertThat(executor.runTaskNos).containsExactly(response.getTaskNo());
         assertThat(taskMapper.tasks.get(response.getTaskNo()).getDiagnoseType()).isEqualTo(DiagnoseType.HIGH_CPU.name());
-        assertThat(taskMapper.tasks.get(response.getTaskNo()).getConclusion()).contains("CPU 高诊断证据充分");
+        assertThat(taskMapper.tasks.get(response.getTaskNo()).getConclusion()).isEqualTo("热点线程导致 CPU 持续升高。");
         assertThat(reportMapper.reports.get(response.getTaskNo()).getReportMarkdown()).contains("结论摘要");
+        assertThat(reportMapper.reports.get(response.getTaskNo()).getReportJson()).contains("rootCause");
     }
 
     @Test
@@ -125,8 +129,24 @@ class AiDiagnosisOrchestratorTest {
                 recordMapper,
                 reportGenerator,
                 new DiagnoseReportService(reportMapper),
+                fakeSummarizer(properties),
+                new ObjectMapper(),
                 properties
         );
+    }
+
+    private DiagnosisInsightSummarizer fakeSummarizer(DiagnosisAiProperties properties) {
+        return new DiagnosisInsightSummarizer(null, new ObjectMapper(), properties) {
+            @Override
+            public DiagnosisInsightSummary summarize(String reportMarkdown) {
+                DiagnosisInsightSummary summary = new DiagnosisInsightSummary();
+                summary.setRootCause("热点线程导致 CPU 持续升高。");
+                summary.setSpecificReasons(List.of("热点线程 CPU 占用集中。", "业务方法耗时显著偏高。"));
+                summary.setExpectedEffect("预计 CPU 与 P95 下降，需压测验证。");
+                summary.setRecommendedActions(List.of("优化热点方法。", "灰度验证指标。"));
+                return summary;
+            }
+        };
     }
 
     private AiDiagnoseRequest request(String question) {

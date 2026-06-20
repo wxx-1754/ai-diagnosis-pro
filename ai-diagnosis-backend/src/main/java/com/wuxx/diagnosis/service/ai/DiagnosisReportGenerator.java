@@ -32,6 +32,12 @@ public class DiagnosisReportGenerator {
             6. 输出必须结构化。
             7. 建议优先给出低风险排查手段。
             8. 如果发现问题可能与 SQL、Redis、RPC、HTTP 下游调用有关，需要说明需要结合对应系统进一步确认。
+            9. “根因分析”必须先给出一句话结论，再说明结论与关键证据之间的关系。
+            10. “预期效果”只能给出保守估算或区间，并明确最终结果需要通过压测或同口径监控验证；证据不足时不得编造数字。
+            11. “推荐操作”必须使用有序列表，每一步写清修改对象、具体操作和验证方式。
+            12. 必须严格使用用户要求的二级 Markdown 标题，标题不得加粗、改名、合并或省略。
+            13. 不要使用 Markdown 代码围栏包裹整份报告。
+            14. “根因分析”的第一段必须是不超过 100 个中文字符的一句话简要结论，后续解释放在“关键发现”中。
             """;
 
     private final ChatClient chatClient;
@@ -47,7 +53,13 @@ public class DiagnosisReportGenerator {
                         .temperature(properties.getReportTemperature())
                         .build())
                 .system(SYSTEM_PROMPT)
-                .user("""
+                .user(buildReportPrompt(task, arthasOutputs))
+                .call()
+                .content();
+    }
+
+    String buildReportPrompt(DiagnoseTask task, String arthasOutputs) {
+        return """
                         诊断任务信息：
                         taskNo: %s
                         appId: %s
@@ -68,10 +80,10 @@ public class DiagnosisReportGenerator {
                         ## 2. 诊断类型
                         ## 3. 执行步骤
                         ## 4. 关键发现
-                        ## 5. 初步判断
-                        ## 6. 建议方案
-                        ## 7. 风险提示
-                        ## 8. 后续建议
+                        ## 5. 根因分析
+                        ## 6. 预期效果
+                        ## 7. 推荐操作
+                        ## 8. 风险提示
                         ## 9. 结论摘要
                         """.formatted(
                         task.getTaskNo(),
@@ -82,9 +94,7 @@ public class DiagnosisReportGenerator {
                         nullToEmpty(task.getTargetClass()),
                         nullToEmpty(task.getTargetMethod()),
                         arthasOutputs
-                ))
-                .call()
-                .content();
+                );
     }
 
     String buildArthasContext(List<ArthasCommandRecord> records) {

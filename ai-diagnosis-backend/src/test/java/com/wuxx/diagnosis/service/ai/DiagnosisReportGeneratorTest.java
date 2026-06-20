@@ -7,6 +7,7 @@ import java.util.List;
 
 import com.wuxx.diagnosis.config.DiagnosisAiProperties;
 import com.wuxx.diagnosis.domain.ArthasCommandRecord;
+import com.wuxx.diagnosis.domain.DiagnoseTask;
 import org.junit.jupiter.api.Test;
 
 class DiagnosisReportGeneratorTest {
@@ -35,5 +36,26 @@ class DiagnosisReportGeneratorTest {
         assertThat(context).doesNotContain("Bearer");
         assertThat(context).doesNotContain("user@example.com");
         assertThat(context).contains("输出过长，已截断");
+    }
+
+    @Test
+    void reportPromptRequiresRootCauseEffectAndDetailedActions() {
+        DiagnosisAiProperties properties = new DiagnosisAiProperties();
+        DiagnosisReportGenerator generator = new DiagnosisReportGenerator(null, properties);
+        DiagnoseTask task = new DiagnoseTask();
+        task.setTaskNo("DIAG-001");
+        task.setAppId("order-service");
+        task.setEnv("prod");
+        task.setQuestion("订单接口变慢");
+        task.setDiagnoseType("SLOW_REQUEST");
+
+        String prompt = generator.buildReportPrompt(task, "trace output");
+
+        assertThat(prompt)
+                .contains("## 5. 根因分析")
+                .contains("## 6. 预期效果")
+                .contains("## 7. 推荐操作")
+                .contains("## 8. 风险提示")
+                .contains("## 9. 结论摘要");
     }
 }

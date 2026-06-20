@@ -5,17 +5,9 @@ import lombok.Data;
 
 @Data
 @Builder
-public class AiDiagnoseResponse {
-
-    private String taskNo;
-
-    private String diagnoseType;
-
-    private String status;
+public class DiagnosisReportPayload {
 
     private String reportMarkdown;
-
-    private String conclusion;
 
     private DiagnosisInsightSummary insightSummary;
 }

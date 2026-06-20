@@ -97,6 +97,14 @@ curl -X POST http://localhost:9001/api/arthas/execute \
 curl "http://localhost:9001/api/arthas/health?appId=order-service&env=test"
 ```
 
+前端服务和环境选择器从在线实例表读取：
+
+```bash
+curl "http://localhost:9001/api/app-instances/options"
+```
+
+接口仅返回 `appId`、`appName` 和 `env`，不会暴露 Arthas 地址或认证信息。
+
 如果目标 Arthas HTTP API 不可连接，接口会返回 `success=false`，并保存 `arthas_command_record` 审计记录。
 
 ## 测试

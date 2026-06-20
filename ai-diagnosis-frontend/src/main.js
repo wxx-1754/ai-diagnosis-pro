@@ -1,4 +1,6 @@
 import anime from 'animejs/lib/anime.es.js';
+import '@phosphor-icons/web/regular';
+import { createEmptyInsightSummary, extractInsightSummary } from './insight-summary.js';
 import './styles.css';
 
 const STREAM_EVENT_TYPES = [
@@ -33,48 +35,78 @@ const EVENT_LABELS = {
   MESSAGE: '消息'
 };
 
+const EVENT_META = {
+  TASK_CREATED: { icon: 'ph-plugs-connected', tone: 'blue' },
+  INTENT_CLASSIFYING: { icon: 'ph-magnifying-glass', tone: 'cyan' },
+  INTENT_CLASSIFIED: { icon: 'ph-crosshair', tone: 'cyan' },
+  PLAN_CREATED: { icon: 'ph-list-checks', tone: 'blue' },
+  TOOL_CALL_START: { icon: 'ph-terminal-window', tone: 'amber' },
+  TOOL_CALL_SUCCESS: { icon: 'ph-check-circle', tone: 'green' },
+  TOOL_CALL_FAILED: { icon: 'ph-warning', tone: 'red' },
+  AI_ANALYZING: { icon: 'ph-brain', tone: 'violet' },
+  REPORT_GENERATED: { icon: 'ph-file-text', tone: 'violet' },
+  TASK_FINISHED: { icon: 'ph-seal-check', tone: 'green' },
+  TASK_FAILED: { icon: 'ph-warning-octagon', tone: 'red' },
+  STREAM_ERROR: { icon: 'ph-plugs', tone: 'red' },
+  MESSAGE: { icon: 'ph-activity', tone: 'neutral' }
+};
+
+const ENVIRONMENT_LABELS = {
+  dev: '开发环境',
+  test: '测试环境',
+  uat: '验收环境',
+  staging: '预发布环境',
+  prod: '生产环境'
+};
+
 const STAGES = [
   {
     id: 'entry',
     label: '慢请求入口',
     role: 'HTTP Evidence',
     metric: 'P95 3.21s',
-    hint: '业务症状'
+    hint: '业务症状',
+    icon: 'ph-gauge'
   },
   {
     id: 'intent',
     label: '意图识别',
     role: 'AI Classifier',
     metric: 'High CPU',
-    hint: '问题归类'
+    hint: '问题归类',
+    icon: 'ph-crosshair'
   },
   {
     id: 'plan',
     label: '诊断计划',
     role: 'Agent Planner',
     metric: '3 commands',
-    hint: '采样路径'
+    hint: '采样路径',
+    icon: 'ph-list-checks'
   },
   {
     id: 'arthas',
     label: 'Arthas 采样',
     role: 'Tool Calling',
     metric: 'thread -n 5',
-    hint: '现场证据'
+    hint: '现场证据',
+    icon: 'ph-terminal-window'
   },
   {
     id: 'reasoning',
     label: '根因推理',
     role: 'AI Analyzer',
     metric: 'RAG Ready',
-    hint: '证据归因'
+    hint: '证据归因',
+    icon: 'ph-brain'
   },
   {
     id: 'fix',
     label: '修复建议',
     role: 'Action Plan',
     metric: '待验证',
-    hint: '回滚可控'
+    hint: '回滚可控',
+    icon: 'ph-wrench'
   }
 ];
 
@@ -151,24 +183,41 @@ const PRESETS = [
 ];
 
 const DEMO_EVENTS = [
-  ['TASK_CREATED', 'Agent 任务已创建，开始接管现场。'],
+  ['TASK_CREATED', 'Agent 任务已创建，开始接管现场。', { appId: 'order-service', env: 'prod' }],
   ['INTENT_CLASSIFYING', '正在识别异常类型与采样目标。'],
-  ['INTENT_CLASSIFIED', '识别为高 CPU 与慢请求复合问题。'],
-  ['PLAN_CREATED', '已生成 Arthas 采样计划。'],
-  ['TOOL_CALL_START', '执行 thread -n 5 获取热点线程。'],
-  ['TOOL_CALL_SUCCESS', '热点线程集中在 OrderService#createOrder。'],
+  ['INTENT_CLASSIFIED', '识别为高 CPU 与慢请求复合问题。', {
+    diagnoseType: 'HIGH_CPU',
+    confidence: 0.91,
+    reason: '热点线程与慢请求同时出现'
+  }],
+  ['PLAN_CREATED', '已生成 Arthas 采样计划。', 'TOOL_CALLING'],
+  ['TOOL_CALL_START', '执行 thread -n 5 获取热点线程。', { command: 'thread -n 5' }],
+  ['TOOL_CALL_SUCCESS', '热点线程集中在 OrderService#createOrder。', {
+    command: 'thread -n 5',
+    costMillis: 428,
+    outputExcerpt: 'OrderService#createOrder cpu=81.0%'
+  }],
   ['AI_ANALYZING', '正在融合线程栈、目标 URI 和历史报告。'],
-  ['REPORT_GENERATED', '已生成根因与修复建议。'],
-  ['TASK_FINISHED', '诊断完成，等待验证修复效果。']
+  ['REPORT_GENERATED', '已生成根因与修复建议。', {
+    reportMarkdown: demoReport(),
+    insightSummary: demoInsightSummary()
+  }],
+  ['TASK_FINISHED', '诊断完成，等待验证修复效果。', {
+    reportMarkdown: demoReport(),
+    insightSummary: demoInsightSummary()
+  }]
 ];
 
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const state = {
-  apiBase: localStorage.getItem('diagnosis.apiBase') || 'http://localhost:9001',
-  taskNo: localStorage.getItem('diagnosis.activeTaskNo') || '',
+  apiBase: normalizeApiBase(import.meta.env.VITE_API_BASE_URL || 'http://localhost:9001'),
+  taskNo: '',
   appId: 'order-service',
   env: 'prod',
+  instanceOptions: [],
+  optionsLoading: true,
+  optionsError: '',
   userId: 'admin',
   mode: 'TOOL_CALLING',
   question: PRESETS[0].question,
@@ -180,9 +229,15 @@ const state = {
   completedStages: new Set(),
   doneRunbook: new Set(),
   activeRunbook: 0,
+  stageEvidence: createInitialStageEvidence({
+    symptomMetric: PRESETS[0].metric,
+    targetUri: PRESETS[0].targetUri
+  }),
   events: [],
   commandRecords: [],
   reportMarkdown: '',
+  insightSummary: createEmptyInsightSummary(),
+  runbookTiming: createInitialRunbookTiming(),
   lastResponse: null,
   eventSource: null,
   demoTimer: null,
@@ -196,8 +251,8 @@ document.querySelector('#app').innerHTML = `
       <a class="mark" href="/" aria-label="AI Arthas Diagnosis">A</a>
       <nav class="rail-nav">
         <button class="rail-button is-active" type="button" data-jump="map" aria-label="因果图谱">图</button>
-        <button class="rail-button" type="button" data-jump="stream" aria-label="事件流">流</button>
-        <button class="rail-button" type="button" data-jump="report" aria-label="诊断报告">报</button>
+        <button class="rail-button" type="button" data-jump="result" aria-label="根因与建议">因</button>
+        <button class="rail-button" type="button" data-jump="plan" aria-label="执行计划">计</button>
       </nav>
       <div class="rail-bottom">
         <span class="rail-state" data-connection-dot></span>
@@ -216,29 +271,31 @@ document.querySelector('#app').innerHTML = `
         <div class="top-fields">
           <label>
             <span>服务</span>
-            <input id="appId" value="${escapeHtml(state.appId)}" autocomplete="off" />
+            <select id="appId" disabled aria-label="服务">
+              <option>正在加载服务...</option>
+            </select>
           </label>
           <label>
             <span>环境</span>
-            <input id="env" value="${escapeHtml(state.env)}" autocomplete="off" />
+            <select id="env" disabled aria-label="环境">
+              <option>正在加载环境...</option>
+            </select>
           </label>
-          <label class="backend-field">
-            <span>Backend</span>
-            <input id="apiBase" value="${escapeHtml(state.apiBase)}" autocomplete="url" />
-          </label>
-        </div>
-
-        <div class="session-strip" aria-live="polite">
-          <div>
-            <small>会话进度</small>
-            <strong data-progress-label>0 / ${STAGES.length}</strong>
+          <div class="active-task-field" data-active-task hidden aria-live="polite">
+            <span class="field-label">
+              <span class="field-icon" aria-hidden="true">◎</span>
+              活动事件
+            </span>
+            <strong data-active-task-value></strong>
           </div>
-          <div class="progress-track" aria-hidden="true">
-            <span data-progress-bar></span>
-          </div>
-          <div>
-            <small>当前任务</small>
-            <strong data-task-label>${escapeHtml(state.taskNo || '未创建')}</strong>
+          <div class="session-field">
+            <span>会话进度</span>
+            <div class="session-strip" data-session-strip aria-live="polite">
+              <strong data-progress-label>0 / ${STAGES.length} 步骤完成</strong>
+              <div class="progress-track" aria-hidden="true">
+                <span data-progress-bar></span>
+              </div>
+            </div>
           </div>
         </div>
       </header>
@@ -300,10 +357,15 @@ document.querySelector('#app').innerHTML = `
               ${STAGES.map((stage, index) => `
                 <article class="flow-node ${index === 0 ? 'is-active' : ''}" data-stage="${index}" data-stage-id="${stage.id}">
                   <div class="evidence-tag">
-                    <span>Evidence</span>
+                    <span class="evidence-label">
+                      <i class="ph ph-target" aria-hidden="true"></i>
+                      Evidence
+                    </span>
                     <strong data-stage-metric="${index}">${escapeHtml(stage.metric)}</strong>
+                    <small data-stage-detail="${index}">${escapeHtml(stage.hint)}</small>
                   </div>
                   <div class="node-shell">
+                    <i class="ph ${escapeHtml(stage.icon)} node-icon" aria-hidden="true"></i>
                     <small>${escapeHtml(stage.role)}</small>
                     <h3>${escapeHtml(stage.label)}</h3>
                     <p>${escapeHtml(stage.hint)}</p>
@@ -313,64 +375,98 @@ document.querySelector('#app').innerHTML = `
               `).join('')}
             </div>
           </div>
+
+          <section id="plan" class="agent-plan" aria-label="智能体执行计划">
+            <div class="plan-head">
+              <div>
+                <p class="panel-label">智能体执行计划</p>
+                <h2>Agent runbook</h2>
+              </div>
+              <div class="plan-meta">
+                <span data-mode-label>${escapeHtml(state.mode)}</span>
+                <span data-cost-label>等待启动</span>
+              </div>
+            </div>
+            <div class="plan-track" data-plan-track>
+              ${RUNBOOK.map((step, index) => `
+                <div class="plan-segment">
+                  <article class="plan-step ${index === 0 ? 'is-active' : ''}" data-runbook="${index}">
+                    <div class="plan-step-head">
+                      <span class="plan-index">${index + 1}</span>
+                      <span class="plan-status" data-runbook-status="${index}"></span>
+                    </div>
+                    <strong>${escapeHtml(step.title)}</strong>
+                    <p>${escapeHtml(step.detail)}</p>
+                    <small class="plan-duration" data-runbook-duration="${index}">等待执行</small>
+                  </article>
+                  ${index < RUNBOOK.length - 1 ? `
+                    <span class="plan-connector" aria-hidden="true">
+                      <i class="ph ph-arrow-right"></i>
+                    </span>
+                  ` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </section>
         </section>
 
-        <aside class="insight-panel reveal" aria-label="根因与建议">
-          <section class="insight-card root-card">
+        <aside id="result" class="insight-panel reveal" aria-label="根因与建议">
+          <section class="insight-card diagnosis-result-card">
             <div class="insight-heading">
               <p class="panel-label">根因与建议</p>
               <span data-status-pill>Ready</span>
             </div>
-            <div class="root-orb" aria-hidden="true"></div>
-            <h2 data-root-title>等待诊断事件</h2>
-            <p data-root-copy>启动 Agent 后，SSE 事件会推动图谱节点、计划步骤和报告区域同步更新。</p>
-          </section>
-
-          <section id="stream" class="insight-card stream-card">
-            <div class="insight-heading">
-              <h3>流式事件</h3>
-              <span data-event-count>0 events</span>
+            <div class="result-section root-analysis">
+              <div class="result-section-title">
+                <i class="ph ph-brain" aria-hidden="true"></i>
+                <h3>根因分析</h3>
+              </div>
+              <strong class="root-conclusion" data-root-title>等待诊断事件</strong>
+              <p data-root-copy>启动 Agent 后，AI 将根据采样证据生成根因结论。</p>
             </div>
-            <div class="stream-list" data-stream-list></div>
-          </section>
-
-          <section id="report" class="insight-card report-card">
-            <div class="insight-heading">
-              <h3>AI 报告</h3>
-              <button class="text-button" type="button" data-refresh-detail>刷新</button>
+            <div class="result-section reason-section">
+              <div class="result-section-title">
+                <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+                <h3>具体原因</h3>
+              </div>
+              <ul class="reason-list" data-reason-list>
+                <li>等待 AI 从完整诊断报告中提炼具体原因。</li>
+              </ul>
             </div>
-            <article class="report-body" data-report-body></article>
+            <div class="result-section effect-section">
+              <div class="result-section-title">
+                <i class="ph ph-trend-down" aria-hidden="true"></i>
+                <h3>预期效果</h3>
+              </div>
+              <p data-expected-effect>暂无可靠估算，需在修复后验证。</p>
+            </div>
+            <div class="result-section action-section">
+              <div class="result-section-title">
+                <i class="ph ph-terminal-window" aria-hidden="true"></i>
+                <h3>推荐操作</h3>
+              </div>
+              <ol class="action-list" data-action-list>
+                <li>等待诊断完成后生成详细操作。</li>
+              </ol>
+            </div>
+            <div class="report-download">
+              <div>
+                <strong>完整诊断报告</strong>
+                <small>包含执行步骤、风险提示和结论摘要</small>
+              </div>
+              <button class="primary-button download-button" type="button" data-download-report disabled>
+                <i class="ph ph-download-simple" aria-hidden="true"></i>
+                下载 Markdown
+              </button>
+            </div>
           </section>
         </aside>
       </main>
-
-      <section class="agent-plan reveal" aria-label="智能体执行计划">
-        <div class="plan-head">
-          <div>
-            <p class="panel-label">智能体执行计划</p>
-            <h2>Agent runbook</h2>
-          </div>
-          <div class="plan-meta">
-            <span data-mode-label>${escapeHtml(state.mode)}</span>
-            <span data-cost-label>等待启动</span>
-          </div>
-        </div>
-        <div class="plan-track" data-plan-track>
-          ${RUNBOOK.map((step, index) => `
-            <article class="plan-step ${index === 0 ? 'is-active' : ''}" data-runbook="${index}">
-              <span>${index + 1}</span>
-              <strong>${escapeHtml(step.title)}</strong>
-              <p>${escapeHtml(step.detail)}</p>
-            </article>
-          `).join('')}
-        </div>
-      </section>
     </div>
   </div>
 `;
 
 const refs = {
-  apiBase: document.querySelector('#apiBase'),
   appId: document.querySelector('#appId'),
   env: document.querySelector('#env'),
   question: document.querySelector('#question'),
@@ -381,12 +477,13 @@ const refs = {
   quickAi: document.querySelector('[data-quick-ai]'),
   demoFlow: document.querySelector('[data-demo-flow]'),
   stopStream: document.querySelector('[data-stop-stream]'),
-  refreshDetail: document.querySelector('[data-refresh-detail]')
+  downloadReport: document.querySelector('[data-download-report]')
 };
 
 bindEvents();
 renderAll();
 runIntroAnimation();
+loadInstanceOptions();
 
 function bindEvents() {
   document.querySelectorAll('[data-jump]').forEach((button) => {
@@ -400,7 +497,15 @@ function bindEvents() {
     button.addEventListener('click', () => applyPreset(Number(button.dataset.preset), button));
   });
 
-  [refs.apiBase, refs.appId, refs.env, refs.question, refs.targetUri, refs.targetClass, refs.targetMethod].forEach((input) => {
+  refs.appId.addEventListener('change', () => {
+    state.appId = refs.appId.value;
+    renderEnvironmentOptions();
+    readInputs();
+  });
+
+  refs.env.addEventListener('change', readInputs);
+
+  [refs.question, refs.targetUri, refs.targetClass, refs.targetMethod].forEach((input) => {
     input.addEventListener('change', readInputs);
   });
 
@@ -408,7 +513,88 @@ function bindEvents() {
   refs.quickAi.addEventListener('click', runQuickAi);
   refs.demoFlow.addEventListener('click', playDemoFlow);
   refs.stopStream.addEventListener('click', () => closeLiveSources(true));
-  refs.refreshDetail.addEventListener('click', () => refreshReport());
+  refs.downloadReport.addEventListener('click', downloadReport);
+}
+
+async function loadInstanceOptions() {
+  state.optionsLoading = true;
+  state.optionsError = '';
+  renderInstanceOptionState();
+  updateActionAvailability();
+
+  try {
+    const options = await requestJson(`${state.apiBase}/api/app-instances/options`);
+    state.instanceOptions = Array.isArray(options)
+      ? options.filter((option) => option?.appId && option?.env)
+      : [];
+
+    if (!state.instanceOptions.length) {
+      throw new Error('数据库中没有可用的在线服务实例。');
+    }
+
+    renderServiceOptions();
+  } catch (error) {
+    state.instanceOptions = [];
+    state.optionsError = error.message || '服务与环境加载失败。';
+    state.optionsLoading = false;
+    renderInstanceOptionState();
+    showNotice(state.optionsError);
+  } finally {
+    state.optionsLoading = false;
+    updateActionAvailability();
+  }
+}
+
+function renderInstanceOptionState() {
+  if (state.optionsLoading) {
+    refs.appId.innerHTML = '<option>正在加载服务...</option>';
+    refs.env.innerHTML = '<option>正在加载环境...</option>';
+  } else if (state.optionsError) {
+    refs.appId.innerHTML = '<option>服务加载失败</option>';
+    refs.env.innerHTML = '<option>环境加载失败</option>';
+  }
+
+  refs.appId.disabled = true;
+  refs.env.disabled = true;
+}
+
+function renderServiceOptions() {
+  const services = new Map();
+
+  state.instanceOptions.forEach((option) => {
+    if (!services.has(option.appId)) {
+      services.set(option.appId, option.appName || option.appId);
+    }
+  });
+
+  const appIds = [...services.keys()];
+  state.appId = appIds.includes(state.appId) ? state.appId : appIds[0];
+  refs.appId.innerHTML = appIds.map((appId) => {
+    const appName = services.get(appId);
+    const label = appName && appName !== appId ? `${appName} (${appId})` : appId;
+    return `<option value="${escapeHtml(appId)}">${escapeHtml(label)}</option>`;
+  }).join('');
+  refs.appId.value = state.appId;
+  refs.appId.disabled = false;
+  renderEnvironmentOptions();
+}
+
+function renderEnvironmentOptions() {
+  const environments = [...new Set(
+    state.instanceOptions
+      .filter((option) => option.appId === refs.appId.value)
+      .map((option) => option.env)
+  )];
+
+  state.env = environments.includes(state.env) ? state.env : environments[0] || '';
+  refs.env.innerHTML = environments.length
+    ? environments.map((env, index) => `
+        <option value="${escapeHtml(env)}">${escapeHtml(formatEnvironmentLabel(env, index))}</option>
+      `).join('')
+    : '<option>暂无可用环境</option>';
+  refs.env.value = state.env;
+  refs.env.disabled = environments.length === 0;
+  updateActionAvailability();
 }
 
 function applyPreset(index, button) {
@@ -425,20 +611,22 @@ function applyPreset(index, button) {
   refs.targetUri.value = state.targetUri;
 
   document.querySelectorAll('[data-preset]').forEach((item) => item.classList.toggle('is-active', item === button));
-  document.querySelector('[data-stage-metric="0"]').textContent = preset.metric;
+  state.stageEvidence[0] = {
+    primary: preset.metric,
+    detail: preset.targetUri,
+    eventType: 'TASK_CREATED'
+  };
+  renderMapState();
   animatePress(button);
 }
 
 function readInputs() {
-  state.apiBase = normalizeApiBase(refs.apiBase.value);
-  state.appId = refs.appId.value.trim() || 'order-service';
-  state.env = refs.env.value.trim() || 'prod';
+  state.appId = refs.appId.value;
+  state.env = refs.env.value;
   state.question = refs.question.value.trim();
   state.targetUri = refs.targetUri.value.trim();
   state.targetClass = refs.targetClass.value.trim();
   state.targetMethod = refs.targetMethod.value.trim();
-  refs.apiBase.value = state.apiBase;
-  localStorage.setItem('diagnosis.apiBase', state.apiBase);
 }
 
 async function startAgentDiagnosis() {
@@ -477,6 +665,7 @@ async function startAgentDiagnosis() {
 
 async function runQuickAi() {
   readInputs();
+  resetRun();
 
   await runAction('AI 快速分析', async () => {
     const response = await requestJson(`${state.apiBase}/api/ai/diagnose`, {
@@ -495,8 +684,10 @@ async function runQuickAi() {
 
     setTaskNo(response.taskNo);
     state.reportMarkdown = response.reportMarkdown || '';
+    state.insightSummary = extractInsightSummary(response);
     pushEvent({ eventType: 'TASK_CREATED', message: 'AI 快速诊断任务已创建。', success: true });
     pushEvent({ eventType: 'REPORT_GENERATED', message: 'AI 诊断报告已返回。', success: true, data: response });
+    pushEvent({ eventType: 'TASK_FINISHED', message: '快速分析已完成。', success: true, data: response });
     renderResponse(response);
     renderReport();
     return response;
@@ -522,13 +713,11 @@ function playDemoFlow() {
       taskNo: state.taskNo,
       eventType: current[0],
       message: current[1],
-      command: current[0] === 'TOOL_CALL_SUCCESS' ? 'thread -n 5' : '',
+      command: current[2]?.command || '',
       toolName: current[0].startsWith('TOOL') ? 'Arthas' : '',
       success: !current[0].includes('FAILED'),
       time: new Date().toISOString(),
-      data: current[0] === 'REPORT_GENERATED'
-        ? { reportMarkdown: demoReport() }
-        : null
+      data: current[2] || null
     });
     index += 1;
   }, 720);
@@ -577,6 +766,7 @@ function handleSseEvent(eventType, event) {
 
   if (eventPayload.eventType === 'REPORT_GENERATED') {
     state.reportMarkdown = extractReportMarkdown(eventPayload.data) || state.reportMarkdown;
+    state.insightSummary = extractInsightSummary(eventPayload.data);
     renderReport();
   }
 
@@ -612,6 +802,7 @@ function pushEvent(event) {
   if (Number.isInteger(stage)) {
     state.activeStage = Math.max(state.activeStage, stage);
     stageChanged = state.activeStage !== previousStage;
+    state.stageEvidence[stage] = deriveStageEvidence(normalized);
 
     for (let index = 0; index < state.activeStage; index += 1) {
       state.completedStages.add(index);
@@ -626,7 +817,10 @@ function pushEvent(event) {
   const runbookIndex = RUNBOOK.findIndex((item) => item.events.includes(normalized.eventType));
   const previousRunbook = state.activeRunbook;
 
-  if (runbookIndex >= 0) {
+  if (normalized.eventType === 'TASK_FAILED' || normalized.eventType === 'STREAM_ERROR') {
+    failRunbookStep(state.activeRunbook, normalized.time);
+  } else if (runbookIndex >= 0) {
+    updateRunbookTiming(runbookIndex, normalized);
     state.activeRunbook = Math.max(state.activeRunbook, runbookIndex);
 
     for (let doneIndex = 0; doneIndex < state.activeRunbook; doneIndex += 1) {
@@ -641,6 +835,7 @@ function pushEvent(event) {
 
   if (normalized.eventType === 'REPORT_GENERATED') {
     state.reportMarkdown = extractReportMarkdown(normalized.data) || state.reportMarkdown;
+    state.insightSummary = extractInsightSummary(normalized.data);
     renderReport();
   }
 
@@ -682,6 +877,7 @@ async function refreshReport() {
   return runAction('刷新报告', async () => {
     const report = await requestJson(`${state.apiBase}/api/ai/diagnose/${encodeURIComponent(state.taskNo)}/report`);
     state.reportMarkdown = report.reportMarkdown || '';
+    state.insightSummary = extractInsightSummary(report);
     renderReport();
     renderResponse(report);
     return report;
@@ -733,7 +929,6 @@ function renderAll() {
 function renderEventDrivenState() {
   renderMapState();
   renderRunbook();
-  renderTimeline();
   renderRootCard();
   renderProgress();
 }
@@ -741,9 +936,17 @@ function renderEventDrivenState() {
 function renderMapState() {
   document.querySelectorAll('[data-stage]').forEach((node) => {
     const index = Number(node.dataset.stage);
+    const evidence = state.stageEvidence[index] || createInitialStageEvidence({
+      symptomMetric: state.symptomMetric,
+      targetUri: state.targetUri
+    })[index];
+    const meta = getEventMeta(evidence.eventType);
     node.classList.toggle('is-active', index === state.activeStage);
     node.classList.toggle('is-done', state.completedStages.has(index));
     node.classList.toggle('is-error', state.events[0]?.eventType === 'TASK_FAILED' && index === state.activeStage);
+    node.dataset.tone = meta.tone;
+    node.querySelector(`[data-stage-metric="${index}"]`).textContent = evidence.primary;
+    node.querySelector(`[data-stage-detail="${index}"]`).textContent = evidence.detail;
   });
 
   document.querySelectorAll('[data-edge]').forEach((edge) => {
@@ -755,45 +958,28 @@ function renderMapState() {
 function renderRunbook() {
   document.querySelectorAll('[data-runbook]').forEach((step) => {
     const index = Number(step.dataset.runbook);
-    step.classList.toggle('is-active', index === state.activeRunbook);
-    step.classList.toggle('is-done', state.doneRunbook.has(index));
+    const timing = state.runbookTiming[index];
+    const status = timing?.status || 'pending';
+    step.classList.toggle('is-active', status === 'running');
+    step.classList.toggle('is-done', status === 'done');
+    step.classList.toggle('is-failed', status === 'failed');
+
+    const statusNode = step.querySelector(`[data-runbook-status="${index}"]`);
+    statusNode.innerHTML = status === 'done'
+      ? '<i class="ph ph-check-circle" aria-hidden="true"></i>已完成'
+      : status === 'failed'
+        ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>失败'
+        : status === 'running'
+          ? '<i class="ph ph-spinner-gap" aria-hidden="true"></i>执行中'
+          : '';
+
+    step.querySelector(`[data-runbook-duration="${index}"]`).textContent = formatRunbookDuration(timing);
   });
-}
-
-function renderTimeline() {
-  const target = document.querySelector('[data-stream-list]');
-  document.querySelector('[data-event-count]').textContent = `${state.events.length} events`;
-
-  if (!state.events.length) {
-    target.innerHTML = `
-      <div class="empty-state">
-        <strong>等待 SSE</strong>
-        <span>启动诊断后，事件会像电流一样推进图谱。</span>
-      </div>
-    `;
-    return;
-  }
-
-  target.innerHTML = state.events.map((event) => {
-    const label = EVENT_LABELS[event.eventType] || event.eventType;
-    const command = [event.toolName, event.command].filter(Boolean).join(' / ');
-    const tone = event.success === false ? 'is-bad' : event.success === true ? 'is-good' : '';
-
-    return `
-      <article class="stream-item ${tone}">
-        <div>
-          <strong>${escapeHtml(label)}</strong>
-          <time>${escapeHtml(formatTime(event.time))}</time>
-        </div>
-        <p>${escapeHtml(event.message || command || '收到事件。')}</p>
-        ${command ? `<small>${escapeHtml(command)}</small>` : ''}
-      </article>
-    `;
-  }).join('');
 }
 
 function renderRootCard() {
   const latest = state.events[0];
+  const insight = state.insightSummary;
   const statusText = state.connection === 'RUNNING'
     ? '分析中'
     : state.connection === 'SUCCESS'
@@ -803,6 +989,25 @@ function renderRootCard() {
         : 'Ready';
 
   document.querySelector('[data-status-pill]').textContent = statusText;
+  document.querySelector('[data-reason-list]').innerHTML = (insight.specificReasons.length
+    ? insight.specificReasons
+    : ['等待 AI 从完整诊断报告中提炼具体原因。'])
+    .map((reason) => `<li>${escapeHtml(reason)}</li>`)
+    .join('');
+  document.querySelector('[data-expected-effect]').textContent = insight.expectedEffect
+    || '等待 AI 根据完整诊断报告生成简要效果摘要。';
+  document.querySelector('[data-action-list]').innerHTML = (insight.recommendedActions.length
+    ? insight.recommendedActions
+    : ['等待 AI 根据完整诊断报告生成简要操作。'])
+    .map((action) => `<li>${escapeHtml(action)}</li>`)
+    .join('');
+  refs.downloadReport.disabled = !state.reportMarkdown;
+
+  if (insight.rootCause) {
+    document.querySelector('[data-root-title]').textContent = insight.rootCause;
+    document.querySelector('[data-root-copy]').textContent = '由 AI 基于完整诊断报告二次提炼。';
+    return;
+  }
 
   if (!latest) {
     document.querySelector('[data-root-title]').textContent = '等待诊断事件';
@@ -833,28 +1038,34 @@ function renderRootCard() {
 }
 
 function renderReport() {
-  const target = document.querySelector('[data-report-body]');
-
-  if (!state.reportMarkdown) {
-    target.innerHTML = `
-      <div class="report-empty">
-        <strong>暂无报告</strong>
-        <p>运行 AI 快速分析，或等待 Agent 生成 REPORT_GENERATED 事件。</p>
-      </div>
-    `;
-    return;
-  }
-
-  target.innerHTML = renderMarkdownPreview(state.reportMarkdown);
+  renderRootCard();
 }
 
 function renderProgress() {
   const doneCount = Math.max(state.completedStages.size, state.activeStage);
-  const progress = Math.min(100, Math.round(((doneCount + (state.events.length ? 1 : 0)) / STAGES.length) * 100));
-  document.querySelector('[data-progress-label]').textContent = `${Math.min(doneCount + 1, STAGES.length)} / ${STAGES.length}`;
+  const isComplete = state.completedStages.size >= STAGES.length;
+  const visibleCount = isComplete
+    ? STAGES.length
+    : Math.min(doneCount + (state.events.length ? 1 : 0), STAGES.length);
+  const progress = Math.min(100, Math.round((visibleCount / STAGES.length) * 100));
+  const progressLabel = document.querySelector('[data-progress-label]');
+  const sessionStrip = document.querySelector('[data-session-strip]');
+  progressLabel.classList.toggle('is-complete', isComplete);
+  sessionStrip.classList.toggle('is-complete', isComplete);
+  progressLabel.innerHTML = isComplete
+    ? '<span class="status-icon" aria-hidden="true">✓</span>已完成分析'
+    : `${visibleCount} / ${STAGES.length} 步骤完成`;
   document.querySelector('[data-progress-bar]').style.width = `${progress}%`;
-  document.querySelector('[data-task-label]').textContent = state.taskNo || '未创建';
+  renderActiveTask();
   document.querySelector('[data-cost-label]').textContent = state.events[0] ? EVENT_LABELS[state.events[0].eventType] || state.events[0].eventType : '等待启动';
+}
+
+function renderActiveTask() {
+  const field = document.querySelector('[data-active-task]');
+  const topFields = document.querySelector('.top-fields');
+  field.hidden = !state.taskNo;
+  topFields.classList.toggle('has-active-task', Boolean(state.taskNo));
+  document.querySelector('[data-active-task-value]').textContent = state.taskNo;
 }
 
 function renderResponse(response) {
@@ -863,18 +1074,21 @@ function renderResponse(response) {
 
 function setTaskNo(taskNo) {
   state.taskNo = taskNo || '';
-  if (state.taskNo) {
-    localStorage.setItem('diagnosis.activeTaskNo', state.taskNo);
-  }
   renderProgress();
 }
 
 function setLoading(loading, label = '') {
   state.loading = loading;
-  [refs.startAgent, refs.quickAi, refs.demoFlow, refs.refreshDetail].forEach((button) => {
-    button.disabled = loading;
-  });
+  updateActionAvailability();
   if (loading) setConnection('RUNNING', `${label}中`);
+}
+
+function updateActionAvailability() {
+  const targetUnavailable = state.optionsLoading || state.instanceOptions.length === 0 || !state.appId || !state.env;
+  refs.startAgent.disabled = state.loading || targetUnavailable;
+  refs.quickAi.disabled = state.loading || targetUnavailable;
+  refs.demoFlow.disabled = state.loading;
+  refs.downloadReport.disabled = state.loading || !state.reportMarkdown;
 }
 
 function setConnection(connection, text) {
@@ -885,13 +1099,20 @@ function setConnection(connection, text) {
 
 function resetRun() {
   closeLiveSources(false);
+  state.taskNo = '';
   state.events = [];
   state.commandRecords = [];
   state.reportMarkdown = '';
+  state.insightSummary = createEmptyInsightSummary();
+  state.runbookTiming = createInitialRunbookTiming();
   state.completedStages = new Set();
   state.doneRunbook = new Set();
   state.activeStage = 0;
   state.activeRunbook = 0;
+  state.stageEvidence = createInitialStageEvidence({
+    symptomMetric: state.symptomMetric,
+    targetUri: state.targetUri
+  });
   renderAll();
 }
 
@@ -930,6 +1151,11 @@ function normalizeApiBase(value) {
   return String(value || 'http://localhost:9001').trim().replace(/\/+$/, '');
 }
 
+function formatEnvironmentLabel(env, index) {
+  const normalized = String(env || '').trim().toLowerCase();
+  return ENVIRONMENT_LABELS[normalized] || `其他环境 ${index + 1}`;
+}
+
 function safeJsonParse(text) {
   try {
     return JSON.parse(text);
@@ -944,75 +1170,257 @@ function extractReportMarkdown(data) {
   return data.reportMarkdown || data.markdown || data.data?.reportMarkdown || '';
 }
 
+function downloadReport() {
+  if (!state.reportMarkdown) return;
+  const blob = new Blob([state.reportMarkdown], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `诊断报告-${state.taskNo || '未命名任务'}.md`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function formatTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value || '').slice(0, 19);
   return date.toLocaleTimeString('zh-CN', { hour12: false });
 }
 
-function renderMarkdownPreview(markdown) {
-  const lines = String(markdown || '').split('\n');
-  let listOpen = false;
-  const html = [];
+function createInitialRunbookTiming() {
+  return RUNBOOK.map(() => ({
+    status: 'pending',
+    startedAt: null,
+    finishedAt: null
+  }));
+}
 
-  lines.forEach((line) => {
-    const text = line.trim();
-    if (!text) {
-      if (listOpen) {
-        html.push('</ul>');
-        listOpen = false;
-      }
-      return;
-    }
+function updateRunbookTiming(index, event) {
+  const eventTime = parseEventTime(event.time);
+  const timing = state.runbookTiming[index];
 
-    if (text.startsWith('## ')) {
-      if (listOpen) {
-        html.push('</ul>');
-        listOpen = false;
-      }
-      html.push(`<h4>${escapeHtml(text.slice(3))}</h4>`);
-      return;
-    }
+  if (!timing.startedAt) timing.startedAt = eventTime;
+  timing.status = 'running';
 
-    if (text.startsWith('# ')) {
-      if (listOpen) {
-        html.push('</ul>');
-        listOpen = false;
-      }
-      html.push(`<h4>${escapeHtml(text.slice(2))}</h4>`);
-      return;
-    }
+  for (let previousIndex = 0; previousIndex < index; previousIndex += 1) {
+    const previous = state.runbookTiming[previousIndex];
+    if (!previous.startedAt) previous.startedAt = eventTime;
+    if (!previous.finishedAt) previous.finishedAt = eventTime;
+    if (previous.status !== 'failed') previous.status = 'done';
+  }
 
-    if (text.startsWith('- ')) {
-      if (!listOpen) {
-        html.push('<ul>');
-        listOpen = true;
-      }
-      html.push(`<li>${escapeHtml(text.slice(2))}</li>`);
-      return;
-    }
+  if (event.eventType === 'TASK_FINISHED') {
+    state.runbookTiming.forEach((item) => {
+      if (!item.startedAt) item.startedAt = eventTime;
+      if (!item.finishedAt) item.finishedAt = eventTime;
+      if (item.status !== 'failed') item.status = 'done';
+    });
+  }
+}
 
-    if (listOpen) {
-      html.push('</ul>');
-      listOpen = false;
-    }
-    html.push(`<p>${escapeHtml(text)}</p>`);
-  });
+function failRunbookStep(index, time) {
+  const timing = state.runbookTiming[index];
+  const eventTime = parseEventTime(time);
+  if (!timing.startedAt) timing.startedAt = eventTime;
+  timing.finishedAt = eventTime;
+  timing.status = 'failed';
+}
 
-  if (listOpen) html.push('</ul>');
-  return html.join('');
+function parseEventTime(value) {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
+function formatRunbookDuration(timing) {
+  if (!timing?.startedAt) return '等待执行';
+  const end = timing.finishedAt || Date.now();
+  const duration = Math.max(0, end - timing.startedAt);
+  if (duration < 1000) return timing.status === 'running' ? '执行中 · <1s' : '耗时 <1s';
+  const seconds = Math.round(duration / 1000);
+  return timing.status === 'running' ? `执行中 · ${seconds}s` : `耗时 ${seconds}s`;
+}
+
+function createInitialStageEvidence(seed = {}) {
+  return [
+    {
+      primary: seed.symptomMetric || PRESETS[0].metric,
+      detail: seed.targetUri || PRESETS[0].targetUri,
+      eventType: 'TASK_CREATED'
+    },
+    { primary: '等待识别', detail: 'AI 分类器', eventType: 'INTENT_CLASSIFYING' },
+    { primary: '等待计划', detail: '尚未生成采样路径', eventType: 'PLAN_CREATED' },
+    { primary: '等待采样', detail: '尚无 Arthas 命令', eventType: 'TOOL_CALL_START' },
+    { primary: '等待推理', detail: '尚无证据摘要', eventType: 'AI_ANALYZING' },
+    { primary: '等待建议', detail: '诊断闭环尚未完成', eventType: 'TASK_FINISHED' }
+  ];
+}
+
+function deriveStageEvidence(event) {
+  const data = event.data;
+  const dataObject = data && typeof data === 'object' ? data : {};
+  const command = event.command || dataObject.command || '';
+  const message = compactEvidence(event.message, 42);
+
+  if (event.eventType === 'TASK_CREATED') {
+    const target = [dataObject.appId || state.appId, dataObject.env || state.env].filter(Boolean).join(' / ');
+    return {
+      primary: compactEvidence(event.taskNo || state.symptomMetric, 28),
+      detail: compactEvidence(target || state.targetUri || message, 38),
+      eventType: event.eventType
+    };
+  }
+
+  if (event.eventType === 'INTENT_CLASSIFYING') {
+    return {
+      primary: '正在识别',
+      detail: compactEvidence(state.targetClass || state.question || message, 38),
+      eventType: event.eventType
+    };
+  }
+
+  if (event.eventType === 'INTENT_CLASSIFIED') {
+    const confidence = Number(dataObject.confidence);
+    const confidenceLabel = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% 置信度` : '';
+    return {
+      primary: compactEvidence(formatDiagnoseType(dataObject.diagnoseType) || message, 28),
+      detail: compactEvidence(confidenceLabel || dataObject.reason || message, 38),
+      eventType: event.eventType
+    };
+  }
+
+  if (event.eventType === 'PLAN_CREATED') {
+    const mode = typeof data === 'string' ? data : dataObject.mode;
+    return {
+      primary: compactEvidence(mode || state.mode || '诊断计划已生成', 28),
+      detail: compactEvidence(message || '准备执行受控采样', 38),
+      eventType: event.eventType
+    };
+  }
+
+  if (event.eventType.startsWith('TOOL_CALL')) {
+    const cost = Number(dataObject.costMillis);
+    const detail = event.success === false
+      ? dataObject.errorMessage || message
+      : Number.isFinite(cost)
+        ? `耗时 ${cost}ms${dataObject.requestNo ? ` / ${dataObject.requestNo}` : ''}`
+        : dataObject.outputExcerpt || message;
+    return {
+      primary: compactEvidence(command || event.toolName || 'Arthas 命令', 30),
+      detail: compactEvidence(detail, 42),
+      eventType: event.eventType
+    };
+  }
+
+  if (event.eventType === 'AI_ANALYZING') {
+    const samples = state.events.filter((item) => item.eventType === 'TOOL_CALL_SUCCESS').length;
+    return {
+      primary: samples ? `融合 ${samples} 条采样证据` : '证据融合中',
+      detail: compactEvidence(message, 38),
+      eventType: event.eventType
+    };
+  }
+
+  if (event.eventType === 'REPORT_GENERATED') {
+    return {
+      primary: '根因报告已生成',
+      detail: compactEvidence(extractReportHeadline(data) || message, 42),
+      eventType: event.eventType
+    };
+  }
+
+  if (event.eventType === 'TASK_FINISHED') {
+    return {
+      primary: '诊断闭环完成',
+      detail: compactEvidence(dataObject.conclusion || extractReportHeadline(data) || message, 42),
+      eventType: event.eventType
+    };
+  }
+
+  if (event.eventType === 'TASK_FAILED' || event.eventType === 'STREAM_ERROR') {
+    return {
+      primary: '诊断链路异常',
+      detail: compactEvidence(message, 42),
+      eventType: event.eventType
+    };
+  }
+
+  return {
+    primary: compactEvidence(EVENT_LABELS[event.eventType] || message, 28),
+    detail: compactEvidence(message, 42),
+    eventType: event.eventType
+  };
+}
+
+function getEventMeta(eventType) {
+  return EVENT_META[eventType] || EVENT_META.MESSAGE;
+}
+
+function formatDiagnoseType(value) {
+  const labels = {
+    HIGH_CPU: '高 CPU',
+    MEMORY_ABNORMAL: '内存异常',
+    THREAD_BLOCKED: '线程阻塞',
+    SLOW_REQUEST: '接口慢',
+    UNKNOWN: '待确认'
+  };
+  return labels[String(value || '').toUpperCase()] || String(value || '');
+}
+
+function extractReportHeadline(data) {
+  const markdown = extractReportMarkdown(data) || (typeof data === 'string' ? data : '');
+  const line = String(markdown)
+    .split('\n')
+    .map((item) => item.replace(/^#+\s*/, '').trim())
+    .find(Boolean);
+  return line || '';
+}
+
+function compactEvidence(value, maxLength = 38) {
+  const text = String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^AI\s*/i, '')
+    .trim();
+  if (!text) return '等待事件数据';
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
 function demoReport() {
   return [
-    '# 诊断结论',
-    '热点线程集中在订单创建链路，业务方法占用时间异常。',
+    '# Java 应用智能诊断报告',
     '',
-    '## 建议',
-    '- 先对 OrderService#createOrder 增加限流和慢调用日志。',
-    '- 复查下游库存接口超时配置。',
-    '- 修复后再次运行同一任务验证 P95 是否回落。'
+    '## 4. 关键发现',
+    '- OrderService#createOrder 占用热点线程 81.0% 的 CPU 时间。',
+    '- 订单创建链路的业务方法耗时显著高于其他采样方法。',
+    '',
+    '## 5. 根因分析',
+    '订单创建方法中的高开销计算导致热点线程持续占用 CPU，并抬高接口 P95。',
+    '',
+    '## 6. 预期效果',
+    '预计优化后 CPU 峰值可降低 25%–40%，P95 可降低 30%–45%；最终效果需通过同流量压测验证。',
+    '',
+    '## 7. 推荐操作',
+    '1. 检查并优化 OrderService#createOrder 中的循环与重复计算，增加对应单元测试。',
+    '2. 在灰度环境发布后，以相同流量观察 CPU、P95 和错误率至少 15 分钟。',
+    '3. 若指标未回落，继续复查下游库存接口耗时与超时配置。'
   ].join('\n');
+}
+
+function demoInsightSummary() {
+  return {
+    rootCause: '订单创建方法的高开销计算持续占用热点线程。',
+    specificReasons: [
+      '热点线程的 CPU 时间主要集中在 createOrder。',
+      '订单创建链路的业务方法耗时显著偏高。'
+    ],
+    expectedEffect: '预计 CPU 峰值和接口 P95 明显下降，最终需同流量压测验证。',
+    recommendedActions: [
+      '优化 createOrder 中的循环与重复计算。',
+      '灰度发布后观察 CPU、P95 和错误率。',
+      '指标未回落时复查下游库存接口。'
+    ]
+  };
 }
 
 function runIntroAnimation() {
@@ -1035,11 +1443,16 @@ function animateEvent(stage, runbookChanged = false) {
   if (reduceMotion) return;
 
   const node = Number.isInteger(stage) ? document.querySelector(`[data-stage="${stage}"] .node-shell`) : null;
+  const nodeIcon = Number.isInteger(stage) ? document.querySelector(`[data-stage="${stage}"] .node-icon`) : null;
+  const evidence = Number.isInteger(stage) ? document.querySelector(`[data-stage="${stage}"] .evidence-tag`) : null;
   const streamItem = document.querySelector('.stream-item');
   const planStep = runbookChanged ? document.querySelector(`[data-runbook="${state.activeRunbook}"]`) : null;
+  const completedPlanStep = runbookChanged && state.activeRunbook > 0
+    ? document.querySelector(`[data-runbook="${state.activeRunbook - 1}"]`)
+    : null;
   const edge = Number.isInteger(stage) && stage > 0 ? document.querySelector(`[data-edge="${stage - 1}"]`) : null;
 
-  [node, streamItem, planStep].filter(Boolean).forEach((target) => {
+  [node, planStep].filter(Boolean).forEach((target) => {
     anime.remove(target);
     anime({
       targets: target,
@@ -1049,6 +1462,51 @@ function animateEvent(stage, runbookChanged = false) {
       easing: 'easeOutCubic'
     });
   });
+
+  if (completedPlanStep) {
+    anime.remove(completedPlanStep);
+    anime({
+      targets: completedPlanStep,
+      scale: [1.02, 1],
+      boxShadow: ['0 0 32px rgba(102, 216, 120, 0.3)', '0 0 0 rgba(102, 216, 120, 0)'],
+      duration: 620,
+      easing: 'easeOutCubic'
+    });
+  }
+
+  if (streamItem) {
+    anime.remove(streamItem);
+    anime({
+      targets: streamItem,
+      opacity: [0, 1],
+      translateX: [14, 0],
+      duration: 460,
+      easing: 'easeOutExpo'
+    });
+  }
+
+  if (evidence) {
+    anime.remove(evidence);
+    anime({
+      targets: evidence,
+      opacity: [0.55, 1],
+      translateY: [-4, 0],
+      duration: 380,
+      easing: 'easeOutCubic'
+    });
+  }
+
+  if (nodeIcon) {
+    anime.remove(nodeIcon);
+    anime({
+      targets: nodeIcon,
+      scale: [0.72, 1],
+      rotate: ['-8deg', '0deg'],
+      opacity: [0.45, 1],
+      duration: 520,
+      easing: 'easeOutBack'
+    });
+  }
 
   if (edge) {
     anime.remove(edge);
