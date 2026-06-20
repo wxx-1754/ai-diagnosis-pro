@@ -10,3 +10,10 @@ logs/
 *.iml
 
 *.log
+
+# 密钥 / 本地环境配置 —— 绝不提交
+.env
+.env.local
+.env.*.local
+application-local.yml
+application-local.yaml
