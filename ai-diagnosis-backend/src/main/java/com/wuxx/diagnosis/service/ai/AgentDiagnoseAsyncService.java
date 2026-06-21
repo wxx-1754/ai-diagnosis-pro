@@ -19,16 +19,24 @@ import com.wuxx.diagnosis.domain.ai.DiagnoseIntentResult;
 import com.wuxx.diagnosis.domain.ai.DiagnosisInsightSummary;
 import com.wuxx.diagnosis.domain.ai.DiagnosisReportPayload;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
+import com.wuxx.diagnosis.knowledge.domain.ReportKnowledgeReference;
+import com.wuxx.diagnosis.knowledge.ingestion.HistoryReportIngestor;
+import com.wuxx.diagnosis.knowledge.mapper.DiagnoseReportReferenceMapper;
 import com.wuxx.diagnosis.service.DiagnoseReportService;
 import com.wuxx.diagnosis.service.DiagnoseTaskService;
 import com.wuxx.diagnosis.service.DiagnoseEventService;
 import com.wuxx.diagnosis.service.TaskExecutionRegistry;
+import com.wuxx.diagnosis.sql.ai.JavaSqlJointReportGenerator;
+import com.wuxx.diagnosis.sql.domain.SqlDiagnosisRecord;
+import com.wuxx.diagnosis.sql.mapper.SqlDiagnosisRecordMapper;
+import com.wuxx.diagnosis.sql.security.SqlSensitiveDataMasker;
 import com.wuxx.diagnosis.sse.DiagnoseEvent;
 import com.wuxx.diagnosis.sse.DiagnoseEventType;
 import com.wuxx.diagnosis.sse.DiagnoseSseManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -64,6 +72,26 @@ public class AgentDiagnoseAsyncService {
 
     private final DiagnoseEventService diagnoseEventService;
 
+    private final SqlDiagnosisRecordMapper sqlDiagnosisRecordMapper;
+
+    private final JavaSqlJointReportGenerator jointReportGenerator;
+
+    private final SqlSensitiveDataMasker sqlSensitiveDataMasker;
+
+    private DiagnoseReportReferenceMapper reportReferenceMapper;
+
+    @Autowired(required = false)
+    public void setReportReferenceMapper(DiagnoseReportReferenceMapper reportReferenceMapper) {
+        this.reportReferenceMapper = reportReferenceMapper;
+    }
+
+    private HistoryReportIngestor historyReportIngestor;
+
+    @Autowired(required = false)
+    public void setHistoryReportIngestor(HistoryReportIngestor historyReportIngestor) {
+        this.historyReportIngestor = historyReportIngestor;
+    }
+
     public AgentDiagnoseAsyncService(DiagnoseTaskService diagnoseTaskService,
                                      DiagnoseIntentClassifier intentClassifier,
                                      HybridDiagnosisExecutor hybridDiagnosisExecutor,
@@ -76,7 +104,10 @@ public class AgentDiagnoseAsyncService {
                                      DiagnosisInsightSummarizer insightSummarizer,
                                      ObjectMapper objectMapper,
                                      TaskExecutionRegistry executionRegistry,
-                                     DiagnoseEventService diagnoseEventService) {
+                                     DiagnoseEventService diagnoseEventService,
+                                     SqlDiagnosisRecordMapper sqlDiagnosisRecordMapper,
+                                     JavaSqlJointReportGenerator jointReportGenerator,
+                                     SqlSensitiveDataMasker sqlSensitiveDataMasker) {
         this.diagnoseTaskService = diagnoseTaskService;
         this.intentClassifier = intentClassifier;
         this.hybridDiagnosisExecutor = hybridDiagnosisExecutor;
@@ -90,6 +121,9 @@ public class AgentDiagnoseAsyncService {
         this.objectMapper = objectMapper;
         this.executionRegistry = executionRegistry;
         this.diagnoseEventService = diagnoseEventService;
+        this.sqlDiagnosisRecordMapper = sqlDiagnosisRecordMapper;
+        this.jointReportGenerator = jointReportGenerator;
+        this.sqlSensitiveDataMasker = sqlSensitiveDataMasker;
     }
 
     public String start(AgentDiagnoseStartRequest request) {
@@ -127,6 +161,8 @@ public class AgentDiagnoseAsyncService {
 
     private void runAsync(String taskNo, AgentDiagnoseStartRequest request) {
         try {
+            log.info("Agent diagnose started, taskNo={}, appId={}, env={}, mode={}, question={}",
+                    taskNo, request.getAppId(), request.getEnv(), request.getMode(), request.getQuestion());
             send(taskNo, DiagnoseEventType.INTENT_CLASSIFYING, "AI 正在识别诊断类型", null);
             DiagnoseIntentResult intent = classify(request);
             String diagnoseType = normalizeDiagnoseType(intent.getDiagnoseType());
@@ -149,6 +185,8 @@ public class AgentDiagnoseAsyncService {
                 ));
             }
 
+            log.info("Agent diagnose execution finished, taskNo={}, conclusion={}",
+                    taskNo, truncate(runResponse.getConclusion(), 500));
             send(taskNo, DiagnoseEventType.AI_ANALYZING, "AI 正在根据 Arthas 输出生成诊断报告", null);
             DiagnoseTask task = diagnoseTaskService.getByTaskNo(taskNo);
             List<ArthasCommandRecord> records = commandRecordMapper.findByTaskNo(taskNo);
@@ -157,20 +195,24 @@ public class AgentDiagnoseAsyncService {
             String summary = insightSummary.getRootCause();
             diagnoseReportService.saveOrUpdate(
                     taskNo,
-                    "Java 应用智能诊断报告",
+                    reportMarkdown.startsWith("# Java + SQL") ? "Java + SQL 联合诊断报告" : "Java 应用智能诊断报告",
                     reportMarkdown,
                     serializeInsight(insightSummary),
                     properties.getChatModel(),
                     properties.getPromptVersion()
             );
+            attachKnowledgeReferences(taskNo);
             diagnoseTaskService.markFinished(taskNo, summary);
 
             DiagnosisReportPayload payload = DiagnosisReportPayload.builder()
                     .reportMarkdown(reportMarkdown)
                     .insightSummary(insightSummary)
+                    .references(references(taskNo))
                     .build();
             send(taskNo, DiagnoseEventType.REPORT_GENERATED, "AI 诊断报告与摘要已生成", payload);
             send(taskNo, DiagnoseEventType.TASK_FINISHED, "诊断完成", payload);
+            log.info("Agent diagnose completed, taskNo={}, rootCause={}", taskNo, truncate(summary, 500));
+            ingestHistoryReport(taskNo);
         } catch (Exception exception) {
             log.error("Agent diagnose async failed, taskNo={}", taskNo, exception);
             diagnoseTaskService.markFailed(taskNo, exception.getMessage());
@@ -214,6 +256,27 @@ public class AgentDiagnoseAsyncService {
                                   List<ArthasCommandRecord> records,
                                   DiagnoseRunResponse runResponse) {
         try {
+            SqlDiagnosisRecord sqlRecord = sqlDiagnosisRecordMapper.findLatestByTaskNo(task.getTaskNo());
+            if (sqlRecord != null && "FINISHED".equals(sqlRecord.getStatus())) {
+                log.info("Generating joint Java+SQL report, taskNo={}, sqlRecordId={}, mainTable={}",
+                        task.getTaskNo(), sqlRecord.getId(), sqlRecord.getMainTableName());
+                send(task.getTaskNo(), DiagnoseEventType.JOINT_REPORT_GENERATING,
+                        "正在融合 Java 调用链、SQL Explain 与索引证据", null);
+                String jointReport = jointReportGenerator.generate(
+                        task,
+                        records,
+                        null,
+                        sqlRecord,
+                        sqlSensitiveDataMasker.maskForAi(sqlRecord.getOriginalSql())
+                );
+                sqlRecord.setDiagnosisResult(jointReport);
+                sqlRecord.setUpdatedAt(LocalDateTime.now());
+                sqlDiagnosisRecordMapper.updateResult(sqlRecord);
+                send(task.getTaskNo(), DiagnoseEventType.JOINT_REPORT_GENERATED,
+                        "Java + SQL 联合诊断报告已生成", null);
+                return jointReport;
+            }
+            log.info("Generating Java-only report, taskNo={}, arthasRecordCount={}", task.getTaskNo(), records.size());
             return reportGenerator.generateMarkdownReport(task, records);
         } catch (Exception exception) {
             log.warn("AI report generation failed, save fallback report, taskNo={}, message={}",
@@ -312,5 +375,51 @@ public class AgentDiagnoseAsyncService {
 
     private String nullToDefault(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value : defaultValue;
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (!StringUtils.hasText(value) || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength) + "...(truncated)";
+    }
+
+    private List<ReportKnowledgeReference> references(String taskNo) {
+        return reportReferenceMapper == null ? List.of() : reportReferenceMapper.findByTaskNo(taskNo);
+    }
+
+    /**
+     * 报告落库后，将本任务的知识引用回填 report_id。
+     *
+     * <p>引用记录在报告生成前由 {@link ReportKnowledgeContextService#prepare} 检索时写入，
+     * 此时 diagnose_report 尚未保存、report_id 为空。此处报告已 saveOrUpdate，
+     * 通过 JOIN diagnose_report 把 report_id 补齐，使引用可按报告维度归属与追溯。
+     */
+    private void attachKnowledgeReferences(String taskNo) {
+        if (reportReferenceMapper == null) {
+            return;
+        }
+        try {
+            reportReferenceMapper.attachReportId(taskNo);
+        } catch (RuntimeException exception) {
+            log.warn("Attach knowledge reference report_id failed, taskNo={}, message={}",
+                    taskNo, exception.getMessage());
+        }
+    }
+
+    /**
+     * 异步沉淀历史报告为知识库条目。提交到独立线程执行，不阻塞 SSE 关闭与主流程；
+     * KB 未启用时 ingestor 为空，直接跳过。
+     */
+    private void ingestHistoryReport(String taskNo) {
+        if (historyReportIngestor == null) {
+            return;
+        }
+        try {
+            diagnosisExecutor.execute(() -> historyReportIngestor.ingest(taskNo));
+        } catch (RuntimeException exception) {
+            log.warn("History report ingest submit failed, taskNo={}, message={}",
+                    taskNo, exception.getMessage());
+        }
     }
 }

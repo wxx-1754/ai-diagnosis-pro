@@ -587,6 +587,62 @@
   padding: 16px;
 }
 
+/* SQL 诊断证据融入时间线节点 */
+.replay-sql-evidence {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.replay-sql-meta {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #bceff8;
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.replay-sql-block {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(6 12 18 / 0.68);
+  overflow: hidden;
+}
+
+.replay-sql-block > strong {
+  display: block;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--line);
+  color: #bceff8;
+  font-size: 12px;
+}
+
+.replay-sql-block pre {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  color: var(--muted);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.replay-sql-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgb(255 107 107 / 0.36);
+  border-radius: var(--radius);
+  background: rgb(255 107 107 / 0.08);
+  color: #ffb4b4;
+  font-size: 12px;
+}
+
 .meta-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -756,6 +812,100 @@
   overflow: auto;
 }
 
+.knowledge-references {
+  margin-top: 18px;
+  padding: 22px;
+  border: 1px solid rgb(58 194 183 / 0.24);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgb(58 194 183 / 0.07), transparent 42%),
+    rgb(7 14 20 / 0.82);
+}
+
+.knowledge-reference-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.knowledge-reference {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.025);
+}
+
+.knowledge-reference[data-usage="CITED"] {
+  border-color: rgb(58 194 183 / 0.42);
+  box-shadow: inset 3px 0 0 rgb(58 194 183 / 0.78);
+}
+
+.knowledge-reference-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.knowledge-reference-head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.knowledge-reference-head strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.knowledge-reference-head small,
+.knowledge-reference footer {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.knowledge-citation {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgb(58 194 183 / 0.42);
+  border-radius: 7px;
+  color: #83e5d8;
+  background: rgb(58 194 183 / 0.1);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-weight: 700;
+}
+
+.knowledge-usage {
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #9eb0bc;
+  background: rgb(255 255 255 / 0.05);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.knowledge-reference[data-usage="CITED"] .knowledge-usage {
+  color: #8ce8d9;
+  background: rgb(58 194 183 / 0.12);
+}
+
+.knowledge-reference p {
+  margin: 12px 0 0 50px;
+  color: #b7c2c9;
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.knowledge-reference footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0 50px;
+}
+
 /* responsive */
 @media (max-width: 1280px) {
   .stats-grid {
@@ -785,6 +935,9 @@
   .meta-grid {
     grid-template-columns: 1fr 1fr;
   }
+  .detail-sql-meta {
+    grid-template-columns: 1fr 1fr;
+  }
   .insight-grid {
     grid-template-columns: 1fr;
   }
@@ -798,12 +951,24 @@
     grid-column: span 2;
   }
   .filter-row,
-  .meta-grid {
+  .meta-grid,
+  .replay-sql-evidence {
     grid-template-columns: 1fr;
   }
   .event-task-no {
     margin-left: 0;
     width: 100%;
+  }
+  .knowledge-reference-head {
+    grid-template-columns: auto 1fr;
+  }
+  .knowledge-usage {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .knowledge-reference p,
+  .knowledge-reference footer {
+    margin-left: 0;
   }
 }
 

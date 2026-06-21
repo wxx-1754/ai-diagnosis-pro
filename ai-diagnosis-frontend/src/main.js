@@ -3,6 +3,7 @@ import '@phosphor-icons/web/regular';
 import { createEmptyInsightSummary, extractInsightSummary } from './insight-summary.js';
 import { mountOverview } from './overview.js';
 import { mountEventDetail } from './event-detail.js';
+import { mountKnowledge } from './knowledge.js';
 import { railHtml } from './rail.js';
 import './styles.css';
 
@@ -14,6 +15,23 @@ const STREAM_EVENT_TYPES = [
   'TOOL_CALL_START',
   'TOOL_CALL_SUCCESS',
   'TOOL_CALL_FAILED',
+  'SQL_CAPTURE_WAITING',
+  'SQL_CAPTURED',
+  'SQL_CAPTURE_FAILED',
+  'SQL_DATASOURCE_SELECTING',
+  'SQL_DATASOURCE_SELECTED',
+  'SQL_DATASOURCE_AMBIGUOUS',
+  'SQL_EXPLAIN_START',
+  'SQL_EXPLAIN_SUCCESS',
+  'SQL_EXPLAIN_FAILED',
+  'SQL_META_COLLECTING',
+  'SQL_META_COLLECTED',
+  'SQL_META_FAILED',
+  'JOINT_REPORT_GENERATING',
+  'JOINT_REPORT_GENERATED',
+  'JOINT_REPORT_FAILED',
+  'KNOWLEDGE_RETRIEVING',
+  'KNOWLEDGE_RETRIEVED',
   'AI_ANALYZING',
   'REPORT_GENERATED',
   'TASK_FINISHED',
@@ -30,6 +48,23 @@ const EVENT_LABELS = {
   TOOL_CALL_START: '工具调用',
   TOOL_CALL_SUCCESS: '采样成功',
   TOOL_CALL_FAILED: '采样失败',
+  SQL_CAPTURE_WAITING: '等待 SQL',
+  SQL_CAPTURED: 'SQL 已捕获',
+  SQL_CAPTURE_FAILED: 'SQL 捕获失败',
+  SQL_DATASOURCE_SELECTING: '匹配数据源',
+  SQL_DATASOURCE_SELECTED: '数据源已选择',
+  SQL_DATASOURCE_AMBIGUOUS: '数据源歧义',
+  SQL_EXPLAIN_START: 'SQL Explain',
+  SQL_EXPLAIN_SUCCESS: 'Explain 成功',
+  SQL_EXPLAIN_FAILED: 'Explain 失败',
+  SQL_META_COLLECTING: '采集元数据',
+  SQL_META_COLLECTED: '元数据完成',
+  SQL_META_FAILED: '元数据失败',
+  JOINT_REPORT_GENERATING: '联合分析',
+  JOINT_REPORT_GENERATED: '联合报告',
+  JOINT_REPORT_FAILED: '联合诊断失败',
+  KNOWLEDGE_RETRIEVING: '检索知识库',
+  KNOWLEDGE_RETRIEVED: '知识检索完成',
   AI_ANALYZING: 'AI 分析',
   REPORT_GENERATED: '报告生成',
   TASK_FINISHED: '诊断完成',
@@ -48,6 +83,23 @@ const EVENT_META = {
   TOOL_CALL_START: { icon: 'ph-terminal-window', tone: 'amber' },
   TOOL_CALL_SUCCESS: { icon: 'ph-check-circle', tone: 'green' },
   TOOL_CALL_FAILED: { icon: 'ph-warning', tone: 'red' },
+  SQL_CAPTURE_WAITING: { icon: 'ph-binoculars', tone: 'amber' },
+  SQL_CAPTURED: { icon: 'ph-check-circle', tone: 'green' },
+  SQL_CAPTURE_FAILED: { icon: 'ph-warning', tone: 'red' },
+  SQL_DATASOURCE_SELECTING: { icon: 'ph-database', tone: 'cyan' },
+  SQL_DATASOURCE_SELECTED: { icon: 'ph-check-circle', tone: 'green' },
+  SQL_DATASOURCE_AMBIGUOUS: { icon: 'ph-warning-circle', tone: 'amber' },
+  SQL_EXPLAIN_START: { icon: 'ph-database', tone: 'amber' },
+  SQL_EXPLAIN_SUCCESS: { icon: 'ph-check-circle', tone: 'green' },
+  SQL_EXPLAIN_FAILED: { icon: 'ph-warning', tone: 'red' },
+  SQL_META_COLLECTING: { icon: 'ph-table', tone: 'cyan' },
+  SQL_META_COLLECTED: { icon: 'ph-check-circle', tone: 'green' },
+  SQL_META_FAILED: { icon: 'ph-warning', tone: 'red' },
+  JOINT_REPORT_GENERATING: { icon: 'ph-brain', tone: 'violet' },
+  JOINT_REPORT_GENERATED: { icon: 'ph-file-text', tone: 'green' },
+  JOINT_REPORT_FAILED: { icon: 'ph-warning-octagon', tone: 'red' },
+  KNOWLEDGE_RETRIEVING: { icon: 'ph-books', tone: 'cyan' },
+  KNOWLEDGE_RETRIEVED: { icon: 'ph-book-open-text', tone: 'green' },
   AI_ANALYZING: { icon: 'ph-brain', tone: 'violet' },
   REPORT_GENERATED: { icon: 'ph-file-text', tone: 'violet' },
   TASK_FINISHED: { icon: 'ph-seal-check', tone: 'green' },
@@ -65,99 +117,80 @@ const ENVIRONMENT_LABELS = {
   prod: '生产环境'
 };
 
-const STAGES = [
-  {
-    id: 'entry',
-    label: '慢请求入口',
-    role: 'HTTP Evidence',
-    metric: 'P95 3.21s',
-    hint: '业务症状',
-    icon: 'ph-gauge'
-  },
-  {
-    id: 'intent',
-    label: '意图识别',
-    role: 'AI Classifier',
-    metric: 'High CPU',
-    hint: '问题归类',
-    icon: 'ph-crosshair'
-  },
-  {
-    id: 'plan',
-    label: '诊断计划',
-    role: 'Agent Planner',
-    metric: '3 commands',
-    hint: '采样路径',
-    icon: 'ph-list-checks'
-  },
-  {
-    id: 'arthas',
-    label: 'Arthas 采样',
-    role: 'Tool Calling',
-    metric: 'thread -n 5',
-    hint: '现场证据',
-    icon: 'ph-terminal-window'
-  },
-  {
-    id: 'reasoning',
-    label: '根因推理',
-    role: 'AI Analyzer',
-    metric: 'RAG Ready',
-    hint: '证据归因',
-    icon: 'ph-brain'
-  },
-  {
-    id: 'fix',
-    label: '修复建议',
-    role: 'Action Plan',
-    metric: '待验证',
-    hint: '回滚可控',
-    icon: 'ph-wrench'
-  }
-];
+// ===== 场景驱动的诊断流程模板 =====
+// 按 diagnoseType 定义候选阶段序列。每个阶段声明：id / type / label / icon / hint。
+// type: PLAN(意图计划) / TOOL(Arthas 采样) / SQL(SQL 诊断) / REPORT(根因报告) / TERMINAL(终态)
+// conditional='SQL' 的阶段初始不渲染，仅当 SQL 相关事件到来时动态插入主时间线。
+// tools: 该 TOOL 阶段接受的工具名（用于把工具事件路由到正确阶段）。
+const FLOW_TEMPLATES = {
+  HIGH_CPU: [
+    { id: 'intent', type: 'PLAN', label: '意图识别', icon: 'ph-crosshair', hint: '识别为 CPU 高' },
+    { id: 'overview', type: 'TOOL', label: '现场快照', icon: 'ph-gauge', hint: 'dashboard / topThreads', tools: ['dashboard', 'topThreads'] },
+    { id: 'thread', type: 'TOOL', label: '热点线程', icon: 'ph-stack', hint: 'thread 堆栈定位', tools: ['threadStack'] },
+    { id: 'reason', type: 'REPORT', label: '根因推理', icon: 'ph-brain', hint: 'AI 归因' },
+    { id: 'done', type: 'TERMINAL', label: '诊断完成', icon: 'ph-seal-check', hint: '等待验证修复' }
+  ],
+  MEMORY_ABNORMAL: [
+    { id: 'intent', type: 'PLAN', label: '意图识别', icon: 'ph-crosshair', hint: '识别为内存异常' },
+    { id: 'mem', type: 'TOOL', label: '内存采样', icon: 'ph-memory', hint: 'memory / dashboard / jvm', tools: ['memoryInfo', 'dashboard', 'jvmInfo'] },
+    { id: 'reason', type: 'REPORT', label: '根因推理', icon: 'ph-brain', hint: 'AI 归因' },
+    { id: 'done', type: 'TERMINAL', label: '诊断完成', icon: 'ph-seal-check', hint: '等待验证修复' }
+  ],
+  THREAD_BLOCKED: [
+    { id: 'intent', type: 'PLAN', label: '意图识别', icon: 'ph-crosshair', hint: '识别为线程阻塞' },
+    { id: 'overview', type: 'TOOL', label: '现场快照', icon: 'ph-gauge', hint: 'dashboard', tools: ['dashboard'] },
+    { id: 'thread', type: 'TOOL', label: '阻塞线程', icon: 'ph-stack', hint: 'thread 堆栈/锁', tools: ['threadStack'] },
+    { id: 'reason', type: 'REPORT', label: '根因推理', icon: 'ph-brain', hint: 'AI 归因' },
+    { id: 'done', type: 'TERMINAL', label: '诊断完成', icon: 'ph-seal-check', hint: '等待验证修复' }
+  ],
+  SLOW_REQUEST: [
+    { id: 'intent', type: 'PLAN', label: '意图识别', icon: 'ph-crosshair', hint: '识别为接口慢' },
+    { id: 'trace', type: 'TOOL', label: '调用链追踪', icon: 'ph-git-branch', hint: 'trace Controller / Service', tools: ['traceMethod'] },
+    { id: 'sql-watch', type: 'SQL', label: 'SQL 捕获', icon: 'ph-binoculars', hint: 'watch MyBatis/JDBC 还原 SQL', conditional: 'SQL', phase: 'WATCH' },
+    { id: 'sql-explain', type: 'SQL', label: 'SQL 分析', icon: 'ph-database', hint: 'Explain + 表/索引元数据', conditional: 'SQL', phase: 'EXPLAIN' },
+    { id: 'reason', type: 'REPORT', label: '根因推理', icon: 'ph-brain', hint: 'Java (+SQL) 联合归因' },
+    { id: 'done', type: 'TERMINAL', label: '诊断完成', icon: 'ph-seal-check', hint: '等待验证修复' }
+  ],
+  UNKNOWN: [
+    { id: 'intent', type: 'PLAN', label: '意图识别', icon: 'ph-crosshair', hint: '问题归类中' },
+    { id: 'sample', type: 'TOOL', label: '现场采样', icon: 'ph-terminal-window', hint: 'Arthas 受控采样' },
+    { id: 'reason', type: 'REPORT', label: '根因推理', icon: 'ph-brain', hint: 'AI 归因' },
+    { id: 'done', type: 'TERMINAL', label: '诊断完成', icon: 'ph-seal-check', hint: '等待验证修复' }
+  ]
+};
 
-const RUNBOOK = [
-  {
-    title: '收集与理解',
-    detail: '创建诊断任务，订阅 SSE 事件流。',
-    events: ['TASK_CREATED', 'INTENT_CLASSIFYING', 'INTENT_CLASSIFIED']
-  },
-  {
-    title: '定位瓶颈',
-    detail: '生成计划，锁定 Arthas 采样命令。',
-    events: ['PLAN_CREATED']
-  },
-  {
-    title: '现场采样',
-    detail: '执行 thread、dashboard、jvm 等受控命令。',
-    events: ['TOOL_CALL_START', 'TOOL_CALL_SUCCESS', 'TOOL_CALL_FAILED']
-  },
-  {
-    title: '根因推理',
-    detail: '融合命令结果与上下文，生成分析结论。',
-    events: ['AI_ANALYZING', 'REPORT_GENERATED']
-  },
-  {
-    title: '建议与验证',
-    detail: '输出修复建议，等待人工验证。',
-    events: ['TASK_FINISHED', 'TASK_FAILED']
-  }
-];
-
-const EVENT_STAGE = {
-  TASK_CREATED: 0,
-  INTENT_CLASSIFYING: 1,
-  INTENT_CLASSIFIED: 1,
-  PLAN_CREATED: 2,
-  TOOL_CALL_START: 3,
-  TOOL_CALL_SUCCESS: 3,
-  TOOL_CALL_FAILED: 3,
-  AI_ANALYZING: 4,
-  REPORT_GENERATED: 4,
-  TASK_FINISHED: 5,
-  TASK_FAILED: 5,
-  TASK_INTERRUPTED: 5,
-  STREAM_ERROR: 5
+// SSE 事件 → 流程阶段的路由表。node 为目标阶段 id；route 为动态路由函数；
+// status 推进该阶段状态；collect 把事件证据收集到阶段；flag 控制特殊行为。
+const EVENT_NODE_MAP = {
+  TASK_CREATED: { node: 'intent', status: 'running' },
+  INTENT_CLASSIFYING: { node: 'intent', status: 'running' },
+  INTENT_CLASSIFIED: { node: 'intent', status: 'done', applyTemplate: true },
+  PLAN_CREATED: { node: 'intent', status: 'done' },
+  TOOL_CALL_START: { route: 'tool', status: 'running', collect: 'command' },
+  TOOL_CALL_SUCCESS: { route: 'tool', status: 'done', collect: 'output' },
+  TOOL_CALL_FAILED: { route: 'tool', status: 'failed', collect: 'error' },
+  SQL_CAPTURE_WAITING: { node: 'sql-watch', status: 'running', collect: 'watchCmd' },
+  SQL_CAPTURED: { node: 'sql-watch', status: 'done', collect: 'capture' },
+  SQL_CAPTURE_FAILED: { node: 'sql-watch', status: 'failed' },
+  SQL_DATASOURCE_SELECTING: { node: 'sql-explain', status: 'running', collect: 'datasource' },
+  SQL_DATASOURCE_SELECTED: { node: 'sql-explain', status: 'running', collect: 'datasource' },
+  SQL_DATASOURCE_AMBIGUOUS: { node: 'sql-explain', status: 'running', collect: 'datasource' },
+  SQL_EXPLAIN_START: { node: 'sql-explain', status: 'running' },
+  SQL_EXPLAIN_SUCCESS: { node: 'sql-explain', status: 'running', collect: 'explain' },
+  SQL_EXPLAIN_FAILED: { node: 'sql-explain', status: 'failed' },
+  SQL_META_COLLECTING: { node: 'sql-explain', status: 'running' },
+  SQL_META_COLLECTED: { node: 'sql-explain', status: 'done', collect: 'metadata' },
+  SQL_META_FAILED: { node: 'sql-explain', status: 'failed' },
+  JOINT_REPORT_GENERATING: { node: 'reason', status: 'running' },
+  JOINT_REPORT_GENERATED: { node: 'reason', status: 'done' },
+  JOINT_REPORT_FAILED: { node: 'reason', status: 'failed' },
+  KNOWLEDGE_RETRIEVING: { node: 'reason', status: 'running' },
+  KNOWLEDGE_RETRIEVED: { node: 'reason', status: 'running' },
+  AI_ANALYZING: { node: 'reason', status: 'running' },
+  REPORT_GENERATED: { node: 'reason', status: 'done' },
+  TASK_FINISHED: { node: 'done', status: 'done', completeAll: true },
+  TASK_FAILED: { targetActive: true, status: 'failed' },
+  TASK_INTERRUPTED: { targetActive: true, status: 'failed' }
 };
 
 const PASSIVE_EVENT_TYPES = new Set(['HEARTBEAT']);
@@ -166,17 +199,18 @@ const CURRENT_TASK_STORAGE_KEY = 'ai-diagnosis.currentTaskNo';
 const DEMO_EVENTS = [
   ['TASK_CREATED', 'Agent 任务已创建，开始接管现场。', { appId: 'order-service', env: 'prod' }],
   ['INTENT_CLASSIFYING', '正在识别异常类型与采样目标。'],
-  ['INTENT_CLASSIFIED', '识别为高 CPU 与慢请求复合问题。', {
-    diagnoseType: 'HIGH_CPU',
+  ['INTENT_CLASSIFIED', '识别为慢请求，准备追踪 Java 调用链。', {
+    diagnoseType: 'SLOW_REQUEST',
     confidence: 0.91,
-    reason: '热点线程与慢请求同时出现'
+    reason: '目标接口响应时间持续升高'
   }],
   ['PLAN_CREATED', '已生成 Arthas 采样计划。', 'TOOL_CALLING'],
-  ['TOOL_CALL_START', '执行 thread -n 5 获取热点线程。', { command: 'thread -n 5' }],
-  ['TOOL_CALL_SUCCESS', '热点线程集中在 OrderService#createOrder。', {
-    command: 'thread -n 5',
+  ['TOOL_CALL_START', '执行 trace 追踪调用链耗时。', { command: 'trace com.example.OrderController createOrder -n 3', toolName: 'traceMethod' }],
+  ['TOOL_CALL_SUCCESS', '调用链已采集，慢点定位到 OrderService#createOrder。', {
+    command: 'trace com.example.OrderController createOrder -n 3',
+    toolName: 'traceMethod',
     costMillis: 428,
-    outputExcerpt: 'OrderService#createOrder cpu=81.0%'
+    outputExcerpt: 'OrderService#createOrder cost=81.0%'
   }],
   ['AI_ANALYZING', '正在融合线程栈、目标 URI 和历史报告。'],
   ['REPORT_GENERATED', '已生成根因与修复建议。', {
@@ -206,23 +240,21 @@ const state = {
   targetMethod: '',
   targetUri: '',
   symptomMetric: '',
-  activeStage: 0,
-  completedStages: new Set(),
-  doneRunbook: new Set(),
-  activeRunbook: 0,
-  stageEvidence: createInitialStageEvidence({}),
+  // 统一的动态流程状态：按 diagnoseType 选模板，SQL 分支按事件动态插入。
+  flow: createEmptyFlow(),
   events: [],
   commandRecords: [],
   reportMarkdown: '',
   insightSummary: createEmptyInsightSummary(),
   resumeDiagnoseType: '',
   observationState: '',
+  taskStatus: '',
   restartAllowed: false,
   lastEventId: 0,
   seenEventIds: new Set(),
-  runbookTiming: createInitialRunbookTiming(),
   lastResponse: null,
   eventSource: null,
+  sqlDiagnosis: null,
   demoTimer: null,
   loading: false,
   connection: 'READY'
@@ -274,7 +306,7 @@ function studioShell() {
           <div class="session-field">
             <span>会话进度</span>
             <div class="session-strip" data-session-strip aria-live="polite">
-              <strong data-progress-label>0 / ${STAGES.length} 步骤完成</strong>
+              <strong data-progress-label>0 / 0 步骤完成</strong>
               <div class="progress-track" aria-hidden="true">
                 <span data-progress-bar></span>
               </div>
@@ -322,33 +354,15 @@ function studioShell() {
             </details>
           </div>
 
-          <div class="graph-wrap" aria-label="因果图谱">
+          <div class="graph-wrap" aria-label="诊断流程">
             <div class="graph-legend">
-              <span><i class="legend-dot java"></i>Java 层</span>
+              <span><i class="legend-dot java"></i>意图/计划</span>
               <span><i class="legend-dot arthas"></i>Arthas 采样</span>
-              <span><i class="legend-dot ai"></i>AI 推理</span>
-              <span><i class="legend-dot done"></i>已验证</span>
+              <span><i class="legend-dot ai"></i>SQL 诊断</span>
+              <span><i class="legend-dot done"></i>已完成</span>
             </div>
-            <div class="cause-map" data-cause-map>
-              ${STAGES.map((stage, index) => `
-                <article class="flow-node ${index === 0 ? 'is-active' : ''}" data-stage="${index}" data-stage-id="${stage.id}">
-                  <div class="evidence-tag">
-                    <span class="evidence-label">
-                      <i class="ph ph-target" aria-hidden="true"></i>
-                      Evidence
-                    </span>
-                    <strong data-stage-metric="${index}">${escapeHtml(stage.metric)}</strong>
-                    <small data-stage-detail="${index}">${escapeHtml(stage.hint)}</small>
-                  </div>
-                  <div class="node-shell">
-                    <i class="ph ${escapeHtml(stage.icon)} node-icon" aria-hidden="true"></i>
-                    <small>${escapeHtml(stage.role)}</small>
-                    <h3>${escapeHtml(stage.label)}</h3>
-                    <p>${escapeHtml(stage.hint)}</p>
-                  </div>
-                  ${index < STAGES.length - 1 ? `<span class="flow-edge" data-edge="${index}"></span>` : ''}
-                </article>
-              `).join('')}
+            <div class="diagnosis-flow" data-diagnosis-flow>
+              <p class="flow-empty" data-flow-empty>启动诊断后，将根据问题类型动态展示诊断流程；若涉及 SQL，SQL 阶段会自动加入流程。</p>
             </div>
           </div>
 
@@ -363,25 +377,8 @@ function studioShell() {
                 <span data-cost-label>等待启动</span>
               </div>
             </div>
-            <div class="plan-track" data-plan-track>
-              ${RUNBOOK.map((step, index) => `
-                <div class="plan-segment">
-                  <article class="plan-step ${index === 0 ? 'is-active' : ''}" data-runbook="${index}">
-                    <div class="plan-step-head">
-                      <span class="plan-index">${index + 1}</span>
-                      <span class="plan-status" data-runbook-status="${index}"></span>
-                    </div>
-                    <strong>${escapeHtml(step.title)}</strong>
-                    <p>${escapeHtml(step.detail)}</p>
-                    <small class="plan-duration" data-runbook-duration="${index}">等待执行</small>
-                  </article>
-                  ${index < RUNBOOK.length - 1 ? `
-                    <span class="plan-connector" aria-hidden="true">
-                      <i class="ph ph-arrow-right"></i>
-                    </span>
-                  ` : ''}
-                </div>
-              `).join('')}
+            <div class="flow-runbook" data-flow-runbook>
+              <p class="flow-empty">等待诊断意图识别后生成执行步骤。</p>
             </div>
           </section>
         </section>
@@ -455,7 +452,9 @@ const refs = {
   quickAi: null,
   demoFlow: null,
   stopStream: null,
-  downloadReport: null
+  downloadReport: null,
+  diagnosisFlow: null,
+  flowRunbook: null
 };
 
 function populateRefs() {
@@ -471,6 +470,8 @@ function populateRefs() {
   refs.demoFlow = document.querySelector('[data-demo-flow]');
   refs.stopStream = document.querySelector('[data-stop-stream]');
   refs.downloadReport = document.querySelector('[data-download-report]');
+  refs.diagnosisFlow = document.querySelector('[data-diagnosis-flow]');
+  refs.flowRunbook = document.querySelector('[data-flow-runbook]');
 }
 
 function mountStudio(resumeTaskNo) {
@@ -498,7 +499,9 @@ async function resumeTask(taskNo) {
     const task = detail?.task || {};
     state.commandRecords = detail?.commandRecords || [];
     state.observationState = detail?.observationState || '';
+    state.taskStatus = task.status || '';
     state.restartAllowed = Boolean(detail?.restartAllowed);
+    state.sqlDiagnosis = detail?.latestSqlDiagnosis || null;
     state.lastEventId = Number(detail?.lastEventId) || 0;
 
     if (task.question) state.question = task.question;
@@ -519,7 +522,7 @@ async function resumeTask(taskNo) {
     }
 
     replayPersistedEvents(detail?.events || []);
-    renderMapState();
+    renderFlow();
     renderResumeBadge();
     updateActionAvailability();
 
@@ -563,7 +566,9 @@ function renderResumeBadge() {
 }
 
 function replayPersistedEvents(events) {
-  events.forEach((event) => pushEvent(event));
+  events.forEach((event) => {
+    pushEvent(event);
+  });
 }
 
 // 必须在 setupRouter() 之前声明，否则 handleRoute 访问时处于 TDZ。
@@ -760,7 +765,7 @@ function playDemoFlow() {
       eventType: current[0],
       message: current[1],
       command: current[2]?.command || '',
-      toolName: current[0].startsWith('TOOL') ? 'Arthas' : '',
+      toolName: current[2]?.toolName || (current[0].startsWith('TOOL') ? 'Arthas' : ''),
       success: !current[0].includes('FAILED'),
       time: new Date().toISOString(),
       data: current[2] || null
@@ -817,6 +822,7 @@ function handleSseEvent(eventType, event) {
   }
 
   if (eventPayload.eventType === 'TASK_FINISHED') {
+    state.taskStatus = 'FINISHED';
     forgetCurrentTask();
     closeLiveSources(false);
     setConnection('SUCCESS', '诊断完成');
@@ -824,6 +830,7 @@ function handleSseEvent(eventType, event) {
   }
 
   if (eventPayload.eventType === 'TASK_FAILED') {
+    state.taskStatus = 'FAILED';
     forgetCurrentTask();
     closeLiveSources(false);
     setConnection('ERROR', '诊断失败');
@@ -831,12 +838,23 @@ function handleSseEvent(eventType, event) {
   }
 
   if (eventPayload.eventType === 'TASK_INTERRUPTED') {
+    state.taskStatus = 'INTERRUPTED';
     forgetCurrentTask();
     state.observationState = 'INTERRUPTED';
     state.restartAllowed = true;
     closeLiveSources(false);
     updateActionAvailability();
     setConnection('ERROR', '诊断已中断，后台执行已不存在');
+  }
+
+  if (eventPayload.eventType === 'JOINT_REPORT_GENERATED') {
+    setConnection('RUNNING', '联合报告已生成，正在保存任务结果');
+  }
+
+  if (eventPayload.eventType === 'JOINT_REPORT_FAILED') {
+    closeLiveSources(false);
+    setConnection('ERROR', 'SQL 联合诊断失败，原 Java 报告已保留');
+    refreshTaskDetail({ silent: true });
   }
 }
 
@@ -859,43 +877,15 @@ function pushEvent(event) {
     time: event.time || new Date().toISOString()
   };
 
-  const stage = EVENT_STAGE[normalized.eventType];
-  const previousStage = state.activeStage;
-  let stageChanged = false;
+  const previousActive = state.flow.activeIndex;
 
-  if (Number.isInteger(stage)) {
-    state.activeStage = Math.max(state.activeStage, stage);
-    stageChanged = state.activeStage !== previousStage;
-    state.stageEvidence[stage] = deriveStageEvidence(normalized);
-
-    for (let index = 0; index < state.activeStage; index += 1) {
-      state.completedStages.add(index);
-    }
-
-    if (normalized.eventType === 'TASK_FINISHED') {
-      STAGES.forEach((_, index) => state.completedStages.add(index));
-      state.activeStage = STAGES.length - 1;
-    }
+  // 意图识别完成时，按 diagnoseType 选择流程模板（SQL 阶段待事件触发后动态插入）
+  if (normalized.eventType === 'INTENT_CLASSIFIED' && normalized.data?.diagnoseType) {
+    state.resumeDiagnoseType = normalized.data.diagnoseType;
+    applyFlowTemplate(normalized.data.diagnoseType);
   }
-
-  const runbookIndex = RUNBOOK.findIndex((item) => item.events.includes(normalized.eventType));
-  const previousRunbook = state.activeRunbook;
-
-  if (normalized.eventType === 'TASK_FAILED' || normalized.eventType === 'STREAM_ERROR') {
-    failRunbookStep(state.activeRunbook, normalized.time);
-  } else if (runbookIndex >= 0) {
-    updateRunbookTiming(runbookIndex, normalized);
-    state.activeRunbook = Math.max(state.activeRunbook, runbookIndex);
-
-    for (let doneIndex = 0; doneIndex < state.activeRunbook; doneIndex += 1) {
-      state.doneRunbook.add(doneIndex);
-    }
-
-    if (normalized.eventType === 'TASK_FINISHED') {
-      RUNBOOK.forEach((_, index) => state.doneRunbook.add(index));
-      state.activeRunbook = RUNBOOK.length - 1;
-    }
-  }
+  // 事件驱动流程推进（含 SQL 分支动态激活）
+  applyEventToFlow(normalized);
 
   if (normalized.eventType === 'REPORT_GENERATED') {
     state.reportMarkdown = extractReportMarkdown(normalized.data) || state.reportMarkdown;
@@ -903,9 +893,13 @@ function pushEvent(event) {
     renderReport();
   }
 
+  if (normalized.eventType === 'TASK_FINISHED') {
+    state.taskStatus = 'FINISHED';
+  }
+
   state.events = [normalized, ...state.events].slice(0, 18);
   renderEventDrivenState();
-  animateEvent(Number.isInteger(stage) && stageChanged ? state.activeStage : null, previousRunbook !== state.activeRunbook);
+  animateEvent(state.flow.activeIndex !== previousActive ? state.flow.activeIndex : null);
 }
 
 async function refreshTaskDetail(options = {}) {
@@ -917,6 +911,10 @@ async function refreshTaskDetail(options = {}) {
   const action = async () => {
     const detail = await requestJson(`${state.apiBase}/api/diagnose/tasks/${encodeURIComponent(state.taskNo)}/detail`);
     state.commandRecords = detail.commandRecords || [];
+    state.taskStatus = detail.task?.status || state.taskStatus;
+    state.resumeDiagnoseType = detail.task?.diagnoseType || state.resumeDiagnoseType;
+    state.sqlDiagnosis = detail.latestSqlDiagnosis || null;
+    renderFlow();
     renderResponse(detail);
     return detail;
   };
@@ -946,6 +944,278 @@ async function refreshReport() {
     renderResponse(report);
     return report;
   });
+}
+
+// ===== 场景驱动的动态流程：模板选择、SQL 分支动态插入、事件路由、渲染 =====
+
+function createEmptyFlow() {
+  return { templateKey: null, template: null, nodes: [], activeIndex: -1, sqlActivated: false };
+}
+
+function toRuntimeNode(stage) {
+  return {
+    id: stage.id,
+    type: stage.type,
+    label: stage.label,
+    icon: stage.icon,
+    hint: stage.hint,
+    tools: stage.tools || null,
+    conditional: stage.conditional || null,
+    status: 'pending',
+    events: [],
+    evidence: {},
+    startedAt: null,
+    endedAt: null
+  };
+}
+
+function applyFlowTemplate(diagnoseType) {
+  const key = normalizeDiagnoseTypeKey(diagnoseType);
+  const template = FLOW_TEMPLATES[key] || FLOW_TEMPLATES.UNKNOWN;
+  state.flow = {
+    templateKey: key,
+    template,
+    nodes: template.filter((stage) => !stage.conditional).map(toRuntimeNode),
+    activeIndex: -1,
+    sqlActivated: false
+  };
+}
+
+function normalizeDiagnoseTypeKey(value) {
+  const key = String(value || '').trim().toUpperCase();
+  return FLOW_TEMPLATES[key] ? key : 'UNKNOWN';
+}
+
+// 第一个 SQL/JOINT 事件到来时，把模板里 conditional=SQL 的阶段按顺序插入到 reason 之前。
+function maybeActivateSqlBranch(event) {
+  if (state.flow.sqlActivated || !state.flow.template) return;
+  const isSqlEvent = event.eventType?.startsWith('SQL_') || event.eventType?.startsWith('JOINT_');
+  if (!isSqlEvent) return;
+  state.flow.sqlActivated = true;
+  const sqlStages = state.flow.template.filter((stage) => stage.conditional === 'SQL');
+  let insertAt = state.flow.nodes.findIndex((node) => node.id === 'reason');
+  if (insertAt < 0) insertAt = state.flow.nodes.length;
+  sqlStages.forEach((stage, offset) => {
+    state.flow.nodes.splice(insertAt + offset, 0, toRuntimeNode(stage));
+  });
+}
+
+function applyEventToFlow(event) {
+  if (!state.flow.template) return;
+  maybeActivateSqlBranch(event);
+  const mapping = EVENT_NODE_MAP[event.eventType];
+  if (!mapping) return;
+
+  let node;
+  if (mapping.route === 'tool') {
+    node = routeToolNode(event);
+  } else if (mapping.targetActive) {
+    node = state.flow.nodes[state.flow.activeIndex] || state.flow.nodes[state.flow.nodes.length - 1];
+  } else {
+    node = state.flow.nodes.find((item) => item.id === mapping.node);
+  }
+  if (!node) return;
+
+  const eventTime = parseEventTime(event.time);
+  if (!node.startedAt) node.startedAt = eventTime;
+  if (mapping.status && mapping.status !== 'running') node.endedAt = eventTime;
+  if (mapping.status) node.status = mapping.status;
+  if (mapping.collect) collectNodeEvidence(node, mapping.collect, event);
+  node.events.push({ eventType: event.eventType, message: event.message, time: event.time });
+
+  // 流程单调推进：把更早的阶段标记完成
+  const currentIndex = state.flow.nodes.indexOf(node);
+  if (currentIndex >= 0) {
+    for (let i = 0; i < currentIndex; i += 1) {
+      const prev = state.flow.nodes[i];
+      if (prev.status === 'pending') {
+        prev.status = 'done';
+        if (!prev.startedAt) prev.startedAt = eventTime;
+        if (!prev.endedAt) prev.endedAt = eventTime;
+      }
+    }
+    if (state.flow.activeIndex < currentIndex) state.flow.activeIndex = currentIndex;
+  }
+
+  if (mapping.completeAll) {
+    state.flow.nodes.forEach((item) => {
+      if (item.status === 'pending' || item.status === 'running') {
+        item.status = 'done';
+        if (!item.startedAt) item.startedAt = eventTime;
+        if (!item.endedAt) item.endedAt = eventTime;
+      }
+    });
+    state.flow.activeIndex = state.flow.nodes.length - 1;
+  }
+}
+
+function routeToolNode(event) {
+  const tool = event.toolName || inferToolFromCommand(event.command);
+  const byTool = state.flow.nodes.find((node) => node.tools?.includes(tool));
+  if (byTool) return byTool;
+  const traceNode = state.flow.nodes.find((node) => node.id === 'trace');
+  if (traceNode && event.command?.startsWith('trace ')) return traceNode;
+  return state.flow.nodes.find((node) => node.type === 'TOOL');
+}
+
+function inferToolFromCommand(command) {
+  if (!command) return '';
+  const head = command.trim().split(/\s+/)[0];
+  if (head === 'trace') return 'traceMethod';
+  return head;
+}
+
+function collectNodeEvidence(node, kind, event) {
+  const data = event.data && typeof event.data === 'object' ? event.data : {};
+  if (kind === 'command') {
+    node.evidence.command = event.command || data.command || node.evidence.command || '';
+    node.evidence.requestNo = data.requestNo || node.evidence.requestNo || '';
+  } else if (kind === 'output') {
+    node.evidence.output = data.output || data.outputExcerpt || event.message || node.evidence.output || '';
+    node.evidence.costMillis = Number.isFinite(Number(data.costMillis)) ? data.costMillis : node.evidence.costMillis;
+    node.evidence.success = true;
+  } else if (kind === 'error') {
+    node.evidence.error = data.errorMessage || event.message || node.evidence.error || '';
+    node.evidence.success = false;
+  } else if (kind === 'watchCmd') {
+    node.evidence.watchCommand = data.command || event.command || node.evidence.watchCommand || '';
+  } else if (kind === 'capture') {
+    node.evidence.captureOutput = data.output || event.message || node.evidence.captureOutput || '';
+    node.evidence.watchCommand = data.command || event.command || node.evidence.watchCommand;
+  } else if (kind === 'datasource') {
+    const name = data.datasourceName;
+    node.evidence.datasource = name
+      ? `${name} · ${data.datasourceCode || ''}`
+      : data.datasourceCode || event.message || node.evidence.datasource || '';
+  } else if (kind === 'explain') {
+    node.evidence.explainResult = data.explainResult || node.evidence.explainResult || '';
+  } else if (kind === 'metadata') {
+    // 元数据采集完成时，从 latestSqlDiagnosis 补全 explain/表结构等完整证据
+    const record = state.sqlDiagnosis;
+    if (record) {
+      node.evidence.explainResult = record.explainResult || node.evidence.explainResult || '';
+      node.evidence.tableMetaJson = record.tableMetaJson || '';
+      node.evidence.indexMetaJson = record.indexMetaJson || '';
+      node.evidence.tableStatsJson = record.tableStatsJson || '';
+      node.evidence.originalSql = record.originalSql || node.evidence.originalSql || '';
+      node.evidence.mainTableName = record.mainTableName || node.evidence.mainTableName || '';
+      node.evidence.datasourceCode = record.datasourceCode || node.evidence.datasourceCode || '';
+    }
+  }
+}
+
+function renderFlow() {
+  if (!refs.diagnosisFlow) return;
+  const nodes = state.flow.nodes;
+  if (!nodes.length) {
+    refs.diagnosisFlow.innerHTML = '<p class="flow-empty">启动诊断后，将根据问题类型动态展示诊断流程；若涉及 SQL，SQL 阶段会自动加入流程。</p>';
+    renderFlowRunbook();
+    return;
+  }
+  refs.diagnosisFlow.innerHTML = `
+    <ol class="flow-track">
+      ${nodes.map((node, index) => flowNodeHtml(node, index)).join('')}
+    </ol>
+  `;
+  renderFlowRunbook();
+}
+
+function flowNodeHtml(node, index) {
+  const isActive = index === state.flow.activeIndex && node.status === 'running';
+  const tones = { PLAN: 'java', TOOL: 'arthas', SQL: 'ai', REPORT: 'ai', TERMINAL: 'done' };
+  const tone = tones[node.type] || 'java';
+  const statusIcon = {
+    pending: 'ph-circle',
+    running: 'ph-spinner-gap',
+    done: 'ph-check-circle',
+    failed: 'ph-warning'
+  }[node.status] || 'ph-circle';
+  const evidenceHtml = flowEvidenceHtml(node);
+  return `
+    <li class="flow-step is-${node.status} ${isActive ? 'is-active' : ''}" data-flow-node="${index}" data-tone="${tone}">
+      <div class="flow-step-head">
+        <span class="flow-marker"><i class="ph ${escapeHtml(node.icon)}" aria-hidden="true"></i></span>
+        <div class="flow-step-meta">
+          <strong>${escapeHtml(node.label)}</strong>
+          <small>${escapeHtml(node.hint || '')}</small>
+        </div>
+        <span class="flow-status"><i class="ph ${statusIcon}" aria-hidden="true"></i>${flowStatusLabel(node)}</span>
+      </div>
+      ${evidenceHtml ? `<div class="flow-evidence">${evidenceHtml}</div>` : ''}
+    </li>
+  `;
+}
+
+function flowStatusLabel(node) {
+  if (node.status === 'running') return '进行中';
+  if (node.status === 'done') return node.endedAt ? `完成 · ${formatDuration(node.startedAt, node.endedAt)}` : '完成';
+  if (node.status === 'failed') return '失败';
+  return '等待';
+}
+
+function flowEvidenceHtml(node) {
+  const ev = node.evidence;
+  const parts = [];
+  if (ev.command) parts.push(flowEvidenceBlock('Arthas 命令', ev.command));
+  if (ev.output) parts.push(flowEvidenceBlock('采样输出', truncateText(ev.output, 600)));
+  if (ev.costMillis != null) parts.push(flowEvidenceBlock('耗时', `${ev.costMillis} ms`));
+  if (ev.error) parts.push(flowEvidenceBlock('错误', ev.error));
+  if (ev.watchCommand) parts.push(flowEvidenceBlock('Watch 命令', ev.watchCommand));
+  if (ev.captureOutput) parts.push(flowEvidenceBlock('捕获 SQL', truncateText(ev.captureOutput, 600)));
+  if (ev.datasource) parts.push(flowEvidenceBlock('数据源', ev.datasource));
+  if (ev.originalSql) parts.push(flowEvidenceBlock('SQL 原文', ev.originalSql));
+  if (ev.explainResult) parts.push(flowEvidenceBlock('MySQL Explain', prettyJson(ev.explainResult)));
+  if (ev.tableMetaJson) parts.push(flowEvidenceBlock('字段结构', prettyJson(ev.tableMetaJson)));
+  if (ev.indexMetaJson) parts.push(flowEvidenceBlock('索引信息', prettyJson(ev.indexMetaJson)));
+  if (ev.tableStatsJson) parts.push(flowEvidenceBlock('表统计', prettyJson(ev.tableStatsJson)));
+  if (node.events.length) {
+    parts.push(`<details class="flow-event-log"><summary>阶段事件 (${node.events.length})</summary><ul>${
+      node.events.map((e) => `<li><small>${escapeHtml(formatTime(e.time))}</small> ${escapeHtml(e.message || e.eventType)}</li>`).join('')
+    }</ul></details>`);
+  }
+  return parts.join('');
+}
+
+function flowEvidenceBlock(label, value) {
+  return `<article class="flow-evidence-block"><span>${escapeHtml(label)}</span><pre>${escapeHtml(value)}</pre></article>`;
+}
+
+function renderFlowRunbook() {
+  if (!refs.flowRunbook) return;
+  const nodes = state.flow.nodes;
+  if (!nodes.length) {
+    refs.flowRunbook.innerHTML = '<p class="flow-empty">等待诊断意图识别后生成执行步骤。</p>';
+    return;
+  }
+  refs.flowRunbook.innerHTML = nodes.map((node, index) => `
+    <div class="flow-runbook-step is-${node.status} ${index === state.flow.activeIndex ? 'is-active' : ''}">
+      <span class="flow-runbook-index">${index + 1}</span>
+      <div>
+        <strong>${escapeHtml(node.label)}</strong>
+        <small>${escapeHtml(node.hint || '')}</small>
+      </div>
+      <span class="flow-runbook-duration">${flowStatusLabel(node)}</span>
+    </div>
+  `).join('');
+}
+
+function prettyJson(value) {
+  if (!value) return '';
+  if (typeof value !== 'string') return JSON.stringify(value, null, 2);
+  try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
+}
+
+function truncateText(value, max) {
+  const text = String(value || '').trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}…`;
+}
+
+function formatDuration(start, end) {
+  if (!start || !end) return '';
+  const ms = Math.max(0, end - start);
+  if (ms < 1000) return '<1s';
+  return `${Math.round(ms / 1000)}s`;
 }
 
 async function runAction(label, action) {
@@ -991,54 +1261,9 @@ function renderAll() {
 }
 
 function renderEventDrivenState() {
-  renderMapState();
-  renderRunbook();
+  renderFlow();
   renderRootCard();
   renderProgress();
-}
-
-function renderMapState() {
-  document.querySelectorAll('[data-stage]').forEach((node) => {
-    const index = Number(node.dataset.stage);
-    const evidence = state.stageEvidence[index] || createInitialStageEvidence({
-      symptomMetric: state.symptomMetric,
-      targetUri: state.targetUri
-    })[index];
-    const meta = getEventMeta(evidence.eventType);
-    node.classList.toggle('is-active', index === state.activeStage);
-    node.classList.toggle('is-done', state.completedStages.has(index));
-    node.classList.toggle('is-error', state.events[0]?.eventType === 'TASK_FAILED' && index === state.activeStage);
-    node.dataset.tone = meta.tone;
-    node.querySelector(`[data-stage-metric="${index}"]`).textContent = evidence.primary;
-    node.querySelector(`[data-stage-detail="${index}"]`).textContent = evidence.detail;
-  });
-
-  document.querySelectorAll('[data-edge]').forEach((edge) => {
-    const index = Number(edge.dataset.edge);
-    edge.classList.toggle('is-hot', index < state.activeStage);
-  });
-}
-
-function renderRunbook() {
-  document.querySelectorAll('[data-runbook]').forEach((step) => {
-    const index = Number(step.dataset.runbook);
-    const timing = state.runbookTiming[index];
-    const status = timing?.status || 'pending';
-    step.classList.toggle('is-active', status === 'running');
-    step.classList.toggle('is-done', status === 'done');
-    step.classList.toggle('is-failed', status === 'failed');
-
-    const statusNode = step.querySelector(`[data-runbook-status="${index}"]`);
-    statusNode.innerHTML = status === 'done'
-      ? '<i class="ph ph-check-circle" aria-hidden="true"></i>已完成'
-      : status === 'failed'
-        ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>失败'
-        : status === 'running'
-          ? '<i class="ph ph-spinner-gap" aria-hidden="true"></i>执行中'
-          : '';
-
-    step.querySelector(`[data-runbook-duration="${index}"]`).textContent = formatRunbookDuration(timing);
-  });
 }
 
 function renderRootCard() {
@@ -1106,19 +1331,22 @@ function renderReport() {
 }
 
 function renderProgress() {
-  const doneCount = Math.max(state.completedStages.size, state.activeStage);
-  const isComplete = state.completedStages.size >= STAGES.length;
+  const total = state.flow.nodes.length;
+  const doneCount = state.flow.nodes.filter((node) => node.status === 'done').length;
+  const isComplete = total > 0 && doneCount >= total;
   const visibleCount = isComplete
-    ? STAGES.length
-    : Math.min(doneCount + (state.events.length ? 1 : 0), STAGES.length);
-  const progress = Math.min(100, Math.round((visibleCount / STAGES.length) * 100));
+    ? total
+    : Math.min(doneCount + (state.flow.activeIndex >= 0 ? 1 : 0), total || 0);
+  const progress = total > 0 ? Math.min(100, Math.round((visibleCount / total) * 100)) : 0;
   const progressLabel = document.querySelector('[data-progress-label]');
   const sessionStrip = document.querySelector('[data-session-strip]');
   progressLabel.classList.toggle('is-complete', isComplete);
   sessionStrip.classList.toggle('is-complete', isComplete);
   progressLabel.innerHTML = isComplete
     ? '<span class="status-icon" aria-hidden="true">✓</span>已完成分析'
-    : `${visibleCount} / ${STAGES.length} 步骤完成`;
+    : total > 0
+      ? `${visibleCount} / ${total} 步骤完成`
+      : '等待启动';
   document.querySelector('[data-progress-bar]').style.width = `${progress}%`;
   renderActiveTask();
   document.querySelector('[data-cost-label]').textContent = state.events[0] ? EVENT_LABELS[state.events[0].eventType] || state.events[0].eventType : '等待启动';
@@ -1211,18 +1439,12 @@ function resetDiagnosisState({ clearInputs = false } = {}) {
   state.insightSummary = createEmptyInsightSummary();
   state.resumeDiagnoseType = '';
   state.observationState = '';
+  state.taskStatus = '';
   state.restartAllowed = false;
   state.lastEventId = 0;
   state.seenEventIds = new Set();
-  state.runbookTiming = createInitialRunbookTiming();
-  state.completedStages = new Set();
-  state.doneRunbook = new Set();
-  state.activeStage = 0;
-  state.activeRunbook = 0;
-  state.stageEvidence = createInitialStageEvidence({
-    symptomMetric: state.symptomMetric,
-    targetUri: state.targetUri
-  });
+  state.sqlDiagnosis = null;
+  state.flow = createEmptyFlow();
 }
 
 function closeLiveSources(recordEvent) {
@@ -1315,172 +1537,9 @@ function formatTime(value) {
   return date.toLocaleTimeString('zh-CN', { hour12: false });
 }
 
-function createInitialRunbookTiming() {
-  return RUNBOOK.map(() => ({
-    status: 'pending',
-    startedAt: null,
-    finishedAt: null
-  }));
-}
-
-function updateRunbookTiming(index, event) {
-  const eventTime = parseEventTime(event.time);
-  const timing = state.runbookTiming[index];
-
-  if (!timing.startedAt) timing.startedAt = eventTime;
-  timing.status = 'running';
-
-  for (let previousIndex = 0; previousIndex < index; previousIndex += 1) {
-    const previous = state.runbookTiming[previousIndex];
-    if (!previous.startedAt) previous.startedAt = eventTime;
-    if (!previous.finishedAt) previous.finishedAt = eventTime;
-    if (previous.status !== 'failed') previous.status = 'done';
-  }
-
-  if (event.eventType === 'TASK_FINISHED') {
-    state.runbookTiming.forEach((item) => {
-      if (!item.startedAt) item.startedAt = eventTime;
-      if (!item.finishedAt) item.finishedAt = eventTime;
-      if (item.status !== 'failed') item.status = 'done';
-    });
-  }
-}
-
-function failRunbookStep(index, time) {
-  const timing = state.runbookTiming[index];
-  const eventTime = parseEventTime(time);
-  if (!timing.startedAt) timing.startedAt = eventTime;
-  timing.finishedAt = eventTime;
-  timing.status = 'failed';
-}
-
 function parseEventTime(value) {
   const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) ? timestamp : Date.now();
-}
-
-function formatRunbookDuration(timing) {
-  if (!timing?.startedAt) return '等待执行';
-  const end = timing.finishedAt || Date.now();
-  const duration = Math.max(0, end - timing.startedAt);
-  if (duration < 1000) return timing.status === 'running' ? '执行中 · <1s' : '耗时 <1s';
-  const seconds = Math.round(duration / 1000);
-  return timing.status === 'running' ? `执行中 · ${seconds}s` : `耗时 ${seconds}s`;
-}
-
-function createInitialStageEvidence(seed = {}) {
-  return [
-    {
-      primary: seed.symptomMetric || '待填写',
-      detail: seed.targetUri || '描述异常现象后开始诊断',
-      eventType: 'TASK_CREATED'
-    },
-    { primary: '等待识别', detail: 'AI 分类器', eventType: 'INTENT_CLASSIFYING' },
-    { primary: '等待计划', detail: '尚未生成采样路径', eventType: 'PLAN_CREATED' },
-    { primary: '等待采样', detail: '尚无 Arthas 命令', eventType: 'TOOL_CALL_START' },
-    { primary: '等待推理', detail: '尚无证据摘要', eventType: 'AI_ANALYZING' },
-    { primary: '等待建议', detail: '诊断闭环尚未完成', eventType: 'TASK_FINISHED' }
-  ];
-}
-
-function deriveStageEvidence(event) {
-  const data = event.data;
-  const dataObject = data && typeof data === 'object' ? data : {};
-  const command = event.command || dataObject.command || '';
-  const message = compactEvidence(event.message, 42);
-
-  if (event.eventType === 'TASK_CREATED') {
-    const target = [dataObject.appId || state.appId, dataObject.env || state.env].filter(Boolean).join(' / ');
-    return {
-      primary: compactEvidence(event.taskNo || state.symptomMetric, 28),
-      detail: compactEvidence(target || state.targetUri || message, 38),
-      eventType: event.eventType
-    };
-  }
-
-  if (event.eventType === 'INTENT_CLASSIFYING') {
-    return {
-      primary: '正在识别',
-      detail: compactEvidence(state.targetClass || state.question || message, 38),
-      eventType: event.eventType
-    };
-  }
-
-  if (event.eventType === 'INTENT_CLASSIFIED') {
-    const confidence = Number(dataObject.confidence);
-    const confidenceLabel = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% 置信度` : '';
-    return {
-      primary: compactEvidence(formatDiagnoseType(dataObject.diagnoseType) || message, 28),
-      detail: compactEvidence(confidenceLabel || dataObject.reason || message, 38),
-      eventType: event.eventType
-    };
-  }
-
-  if (event.eventType === 'PLAN_CREATED') {
-    const mode = typeof data === 'string' ? data : dataObject.mode;
-    return {
-      primary: compactEvidence(mode || state.mode || '诊断计划已生成', 28),
-      detail: compactEvidence(message || '准备执行受控采样', 38),
-      eventType: event.eventType
-    };
-  }
-
-  if (event.eventType.startsWith('TOOL_CALL')) {
-    const cost = Number(dataObject.costMillis);
-    const detail = event.success === false
-      ? dataObject.errorMessage || message
-      : Number.isFinite(cost)
-        ? `耗时 ${cost}ms${dataObject.requestNo ? ` / ${dataObject.requestNo}` : ''}`
-        : dataObject.outputExcerpt || message;
-    return {
-      primary: compactEvidence(command || event.toolName || 'Arthas 命令', 30),
-      detail: compactEvidence(detail, 42),
-      eventType: event.eventType
-    };
-  }
-
-  if (event.eventType === 'AI_ANALYZING') {
-    const samples = state.events.filter((item) => item.eventType === 'TOOL_CALL_SUCCESS').length;
-    return {
-      primary: samples ? `融合 ${samples} 条采样证据` : '证据融合中',
-      detail: compactEvidence(message, 38),
-      eventType: event.eventType
-    };
-  }
-
-  if (event.eventType === 'REPORT_GENERATED') {
-    return {
-      primary: '根因报告已生成',
-      detail: compactEvidence(extractReportHeadline(data) || message, 42),
-      eventType: event.eventType
-    };
-  }
-
-  if (event.eventType === 'TASK_FINISHED') {
-    return {
-      primary: '诊断闭环完成',
-      detail: compactEvidence(dataObject.conclusion || extractReportHeadline(data) || message, 42),
-      eventType: event.eventType
-    };
-  }
-
-  if (event.eventType === 'TASK_FAILED' || event.eventType === 'TASK_INTERRUPTED' || event.eventType === 'STREAM_ERROR') {
-    return {
-      primary: '诊断链路异常',
-      detail: compactEvidence(message, 42),
-      eventType: event.eventType
-    };
-  }
-
-  return {
-    primary: compactEvidence(EVENT_LABELS[event.eventType] || message, 28),
-    detail: compactEvidence(message, 42),
-    eventType: event.eventType
-  };
-}
-
-function getEventMeta(eventType) {
-  return EVENT_META[eventType] || EVENT_META.MESSAGE;
 }
 
 function formatDiagnoseType(value) {
@@ -1492,24 +1551,6 @@ function formatDiagnoseType(value) {
     UNKNOWN: '待确认'
   };
   return labels[String(value || '').toUpperCase()] || String(value || '');
-}
-
-function extractReportHeadline(data) {
-  const markdown = extractReportMarkdown(data) || (typeof data === 'string' ? data : '');
-  const line = String(markdown)
-    .split('\n')
-    .map((item) => item.replace(/^#+\s*/, '').trim())
-    .find(Boolean);
-  return line || '';
-}
-
-function compactEvidence(value, maxLength = 38) {
-  const text = String(value || '')
-    .replace(/\s+/g, ' ')
-    .replace(/^AI\s*/i, '')
-    .trim();
-  if (!text) return '等待事件数据';
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
 function demoReport() {
@@ -1565,20 +1606,17 @@ function runIntroAnimation() {
   });
 }
 
-function animateEvent(stage, runbookChanged = false) {
+function animateEvent(stage) {
   if (reduceMotion) return;
 
-  const node = Number.isInteger(stage) ? document.querySelector(`[data-stage="${stage}"] .node-shell`) : null;
-  const nodeIcon = Number.isInteger(stage) ? document.querySelector(`[data-stage="${stage}"] .node-icon`) : null;
-  const evidence = Number.isInteger(stage) ? document.querySelector(`[data-stage="${stage}"] .evidence-tag`) : null;
-  const streamItem = document.querySelector('.stream-item');
-  const planStep = runbookChanged ? document.querySelector(`[data-runbook="${state.activeRunbook}"]`) : null;
-  const completedPlanStep = runbookChanged && state.activeRunbook > 0
-    ? document.querySelector(`[data-runbook="${state.activeRunbook - 1}"]`)
+  const flowStep = Number.isInteger(stage)
+    ? document.querySelector(`[data-flow-node="${stage}"]`)
     : null;
-  const edge = Number.isInteger(stage) && stage > 0 ? document.querySelector(`[data-edge="${stage - 1}"]`) : null;
+  const runbookStep = Number.isInteger(stage)
+    ? document.querySelector(`.flow-runbook-step:nth-child(${stage + 1})`)
+    : null;
 
-  [node, planStep].filter(Boolean).forEach((target) => {
+  [flowStep, runbookStep].filter(Boolean).forEach((target) => {
     anime.remove(target);
     anime({
       targets: target,
@@ -1589,59 +1627,15 @@ function animateEvent(stage, runbookChanged = false) {
     });
   });
 
-  if (completedPlanStep) {
-    anime.remove(completedPlanStep);
+  const activeMarker = document.querySelector('.flow-step.is-active .flow-marker');
+  if (activeMarker) {
+    anime.remove(activeMarker);
     anime({
-      targets: completedPlanStep,
-      scale: [1.02, 1],
-      boxShadow: ['0 0 32px rgba(102, 216, 120, 0.3)', '0 0 0 rgba(102, 216, 120, 0)'],
-      duration: 620,
-      easing: 'easeOutCubic'
-    });
-  }
-
-  if (streamItem) {
-    anime.remove(streamItem);
-    anime({
-      targets: streamItem,
-      opacity: [0, 1],
-      translateX: [14, 0],
-      duration: 460,
-      easing: 'easeOutExpo'
-    });
-  }
-
-  if (evidence) {
-    anime.remove(evidence);
-    anime({
-      targets: evidence,
-      opacity: [0.55, 1],
-      translateY: [-4, 0],
-      duration: 380,
-      easing: 'easeOutCubic'
-    });
-  }
-
-  if (nodeIcon) {
-    anime.remove(nodeIcon);
-    anime({
-      targets: nodeIcon,
+      targets: activeMarker,
       scale: [0.72, 1],
-      rotate: ['-8deg', '0deg'],
       opacity: [0.45, 1],
       duration: 520,
       easing: 'easeOutBack'
-    });
-  }
-
-  if (edge) {
-    anime.remove(edge);
-    anime({
-      targets: edge,
-      scaleX: [0.15, 1],
-      opacity: [0.2, 1],
-      duration: 520,
-      easing: 'easeOutCubic'
     });
   }
 }
@@ -1718,6 +1712,13 @@ function handleRoute() {
       mountOverview(app, { apiBase: state.apiBase, query });
     }
     activeView = 'overview';
+    window.scrollTo({ top: 0 });
+    return;
+  }
+
+  if (root === 'knowledge') {
+    mountKnowledge(app, { apiBase: state.apiBase, query });
+    activeView = 'knowledge';
     window.scrollTo({ top: 0 });
     return;
   }

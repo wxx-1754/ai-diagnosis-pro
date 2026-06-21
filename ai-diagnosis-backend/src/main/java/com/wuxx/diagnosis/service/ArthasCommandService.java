@@ -66,6 +66,7 @@ public class ArthasCommandService {
             log.info("Arthas command completed, requestNo={}, success={}, costMillis={}",
                     response.getRequestNo(), response.isSuccess(), response.getCostMillis());
             saveRecordQuietly(request, response);
+            logOutputExcerpt(request, response);
 
             if (response.isSuccess()) {
                 sendEvent(request, DiagnoseEventType.TOOL_CALL_SUCCESS, "Arthas 命令执行成功：" + command,
@@ -113,6 +114,28 @@ public class ArthasCommandService {
             return text;
         }
         return text.substring(0, maxLength);
+    }
+
+    /**
+     * 记录命令输出摘要，便于排查 Agent 决策依据（如 trace 调用链是否含 SQL 热点、watch 是否捕获到 SQL）。
+     * 输出可能很长，仅取首部片段并整体作为一条日志，避免刷屏。
+     */
+    private void logOutputExcerpt(ArthasExecuteRequest request, ArthasExecuteResponse response) {
+        String commandType = request.getCommandType();
+        boolean traceLike = commandType != null
+                && (commandType.startsWith("trace") || "rawArthas".equals(commandType));
+        if (!traceLike) {
+            return;
+        }
+        String output = response.getOutput();
+        if (!StringUtils.hasText(output)) {
+            log.info("Arthas output empty, requestNo={}, commandType={}, command={}",
+                    response.getRequestNo(), commandType, response.getCommand());
+            return;
+        }
+        int limit = Math.min(properties.getAuditOutputExcerptLength(), output.length());
+        log.info("Arthas output excerpt, requestNo={}, commandType={}, command={}, outputHead={}",
+                response.getRequestNo(), commandType, response.getCommand(), output.substring(0, limit));
     }
 
     private String generateRequestNo() {

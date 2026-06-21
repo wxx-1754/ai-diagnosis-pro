@@ -37,7 +37,11 @@ public class ArthasHttpCommandExecutor implements ArthasCommandExecutor {
         long start = System.currentTimeMillis();
         try {
             // 双保险：即使命令来自工厂，真正出网前仍要过白名单，防止后续调用方绕过映射层。
-            commandGuard.check(command);
+            if ("rawArthas".equals(commandType)) {
+                checkUnrestrictedAccess(instance, command);
+            } else {
+                commandGuard.check(command);
+            }
             String apiUrl = buildApiUrl(instance);
             log.info("Calling Arthas HTTP API, requestNo={}, url={}, commandType={}",
                     requestNo, apiUrl, commandType);
@@ -88,9 +92,28 @@ public class ArthasHttpCommandExecutor implements ArthasCommandExecutor {
     }
 
     private int resolveExecTimeout(String command) {
+        if (command != null && properties.isUnrestrictedAiCommandsEnabled()) {
+            String prefix = command.trim().split("\\s+", 2)[0];
+            if ("watch".equals(prefix) || "trace".equals(prefix) || "monitor".equals(prefix)
+                    || "tt".equals(prefix) || "stack".equals(prefix)) {
+                return properties.getUnrestrictedAiExecTimeoutMs();
+            }
+        }
         return command != null && command.trim().startsWith("trace ")
                 ? properties.getTraceExecTimeoutMs()
                 : properties.getExecTimeoutMs();
+    }
+
+    private void checkUnrestrictedAccess(AppInstance instance, String command) {
+        if (!properties.isUnrestrictedAiCommandsEnabled()) {
+            throw new SecurityException("AI 原生 Arthas 命令未启用");
+        }
+        boolean environmentAllowed = properties.getUnrestrictedAiEnvironments().stream()
+                .anyMatch(env -> env.equalsIgnoreCase(instance.getEnv()));
+        if (!environmentAllowed) {
+            throw new SecurityException("当前环境禁止 AI 原生 Arthas 命令：" + instance.getEnv());
+        }
+        commandGuard.checkUnrestricted(command, properties.getUnrestrictedAiMaxCommandLength());
     }
 
     private String buildApiUrl(AppInstance instance) {

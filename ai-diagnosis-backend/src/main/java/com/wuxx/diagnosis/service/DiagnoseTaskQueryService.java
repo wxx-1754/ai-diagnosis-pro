@@ -8,6 +8,8 @@ import com.wuxx.diagnosis.domain.DiagnoseTaskDetailResponse;
 import com.wuxx.diagnosis.domain.DiagnoseTaskStatus;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
 import com.wuxx.diagnosis.sse.DiagnoseEvent;
+import com.wuxx.diagnosis.sql.domain.SqlDiagnosisRecord;
+import com.wuxx.diagnosis.sql.mapper.SqlDiagnosisRecordMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -23,6 +25,8 @@ public class DiagnoseTaskQueryService {
 
     private final DiagnoseTaskLifecycleService lifecycleService;
 
+    private final SqlDiagnosisRecordMapper sqlDiagnosisRecordMapper;
+
     public DiagnoseTaskDetailResponse detail(String taskNo) {
         DiagnoseTask task = lifecycleService.reconcile(taskNo);
         List<ArthasCommandRecord> records = arthasCommandRecordMapper.findByTaskNo(taskNo);
@@ -31,6 +35,7 @@ public class DiagnoseTaskQueryService {
         boolean interrupted = DiagnoseTaskStatus.INTERRUPTED.name().equals(task.getStatus());
         boolean active = DiagnoseTaskStatus.CREATED.name().equals(task.getStatus())
                 || DiagnoseTaskStatus.RUNNING.name().equals(task.getStatus());
+        List<SqlDiagnosisRecord> sqlRecords = sqlDiagnosisRecordMapper.findByTaskNo(taskNo);
         return DiagnoseTaskDetailResponse.builder()
                 .task(task)
                 .commandRecords(records)
@@ -38,6 +43,8 @@ public class DiagnoseTaskQueryService {
                 .observationState(active ? "ACTIVE" : interrupted ? "INTERRUPTED" : "TERMINAL")
                 .lastEventId(lastEventId)
                 .restartAllowed(interrupted)
+                .sqlDiagnosisRecords(sqlRecords)
+                .latestSqlDiagnosis(sqlRecords.isEmpty() ? null : sqlRecords.get(0))
                 .build();
     }
 }

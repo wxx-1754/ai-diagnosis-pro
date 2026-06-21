@@ -30,6 +30,7 @@ export function mountEventDetail(container, { taskNo, apiBase }) {
     apiBase,
     detail: null,
     report: null,
+    references: [],
     insight: createEmptyInsightSummary(),
     detailError: '',
     reportError: '',
@@ -130,7 +131,7 @@ function renderDetail(local) {
       </div>
       <ol class="replay-track">
         ${events.length
-          ? `${events.map((event) => eventReplayNodeHtml(event)).join('')}${renderObservationAction(task)}`
+          ? `${events.map((event) => eventReplayNodeHtml(event, local.detail.latestSqlDiagnosis)).join('')}${renderObservationAction(task)}`
           : renderLegacyReplay(task, records)}
       </ol>
     </section>
@@ -141,7 +142,7 @@ function renderDetail(local) {
   `;
 }
 
-function eventReplayNodeHtml(event) {
+function eventReplayNodeHtml(event, sqlRecord) {
   const meta = {
     TASK_CREATED: ['任务创建', 'ph-plugs-connected', 'blue'],
     INTENT_CLASSIFYING: ['识别诊断意图', 'ph-magnifying-glass', 'cyan'],
@@ -150,13 +151,37 @@ function eventReplayNodeHtml(event) {
     TOOL_CALL_START: ['开始采样', 'ph-terminal-window', 'amber'],
     TOOL_CALL_SUCCESS: ['采样成功', 'ph-check-circle', 'green'],
     TOOL_CALL_FAILED: ['采样失败', 'ph-warning', 'red'],
+    SQL_CAPTURE_WAITING: ['等待 SQL 流量', 'ph-binoculars', 'amber'],
+    SQL_CAPTURED: ['SQL 捕获成功', 'ph-check-circle', 'green'],
+    SQL_CAPTURE_FAILED: ['SQL 捕获失败', 'ph-warning', 'red'],
+    SQL_DATASOURCE_SELECTING: ['匹配 SQL 数据源', 'ph-database', 'cyan'],
+    SQL_DATASOURCE_SELECTED: ['SQL 数据源已选择', 'ph-check-circle', 'green'],
+    SQL_DATASOURCE_AMBIGUOUS: ['SQL 数据源存在歧义', 'ph-warning-circle', 'amber'],
+    SQL_EXPLAIN_START: ['开始 SQL Explain', 'ph-database', 'amber'],
+    SQL_EXPLAIN_SUCCESS: ['SQL Explain 成功', 'ph-check-circle', 'green'],
+    SQL_EXPLAIN_FAILED: ['SQL Explain 失败', 'ph-warning', 'red'],
+    SQL_META_COLLECTING: ['采集 SQL 元数据', 'ph-table', 'cyan'],
+    SQL_META_COLLECTED: ['SQL 元数据完成', 'ph-check-circle', 'green'],
+    SQL_META_FAILED: ['SQL 元数据失败', 'ph-warning', 'red'],
+    JOINT_REPORT_GENERATING: ['生成联合报告', 'ph-brain', 'violet'],
+    JOINT_REPORT_GENERATED: ['联合报告完成', 'ph-file-text', 'green'],
+    JOINT_REPORT_FAILED: ['联合诊断失败', 'ph-warning-octagon', 'red'],
+    KNOWLEDGE_RETRIEVING: ['检索诊断知识', 'ph-books', 'cyan'],
+    KNOWLEDGE_RETRIEVED: ['知识证据就绪', 'ph-book-open-text', 'green'],
     AI_ANALYZING: ['AI 分析', 'ph-brain', 'violet'],
     REPORT_GENERATED: ['报告生成', 'ph-file-text', 'violet'],
     TASK_FINISHED: ['诊断完成', 'ph-seal-check', 'green'],
     TASK_FAILED: ['诊断失败', 'ph-warning-octagon', 'red'],
     TASK_INTERRUPTED: ['诊断中断', 'ph-plugs', 'red']
   }[event.eventType] || [event.eventType || '诊断事件', 'ph-activity', 'blue'];
-  const detail = event.command || event.message || '';
+  const eventData = event.data || {};
+  const detail = event.command
+    || eventData.command
+    || (event.eventType === 'SQL_CAPTURED' ? eventData.output : '')
+    || event.message
+    || '';
+  // SQL 证据融入时间线：在关键 SQL 事件节点下展开 explain/元数据等完整证据
+  const sqlEvidence = renderSqlEvidenceForNode(event.eventType, sqlRecord);
   return `
     <li class="replay-node" data-tone="${meta[2]}">
       <span class="replay-marker"><i class="ph ${meta[1]}" aria-hidden="true"></i></span>
@@ -164,9 +189,53 @@ function eventReplayNodeHtml(event) {
         <strong>${escapeHtml(meta[0])}</strong>
         <small>${escapeHtml(formatDateTime(event.time))}</small>
         ${detail ? `<p>${escapeHtml(detail)}</p>` : ''}
+        ${sqlEvidence}
       </div>
     </li>
   `;
+}
+
+// 在 SQL 诊断的关键节点（Explain 完成 / 元数据完成）下嵌入完整证据，
+// 使 SQL 诊断信息作为时间线一部分呈现，而非独立成块。
+function renderSqlEvidenceForNode(eventType, record) {
+  if (!record) return '';
+  if (eventType !== 'SQL_EXPLAIN_SUCCESS' && eventType !== 'SQL_META_COLLECTED' && eventType !== 'JOINT_REPORT_GENERATED') {
+    return '';
+  }
+  const blocks = [];
+  if (record.datasourceCode || record.mainTableName) {
+    blocks.push(`<p class="replay-sql-meta">${
+      [
+        record.datasourceCode ? `数据源 ${escapeHtml(record.datasourceCode)}` : '',
+        record.mainTableName ? `主表 ${escapeHtml(record.mainTableName)}` : '',
+        record.sqlHash ? `指纹 ${escapeHtml(record.sqlHash.slice(0, 16))}` : ''
+      ].filter(Boolean).join(' · ')
+    }</p>`);
+  }
+  if (record.originalSql) blocks.push(sqlEvidenceBlock('SQL 原文', record.originalSql));
+  if (record.explainResult) blocks.push(sqlEvidenceBlock('MySQL JSON Explain', record.explainResult));
+  if (eventType === 'SQL_META_COLLECTED' || eventType === 'JOINT_REPORT_GENERATED') {
+    if (record.tableMetaJson) blocks.push(sqlEvidenceBlock('字段结构', record.tableMetaJson));
+    if (record.indexMetaJson) blocks.push(sqlEvidenceBlock('索引信息', record.indexMetaJson));
+    if (record.tableStatsJson) blocks.push(sqlEvidenceBlock('表统计', record.tableStatsJson));
+  }
+  if (record.errorMessage) blocks.push(`<p class="replay-sql-error">${escapeHtml(record.errorMessage)}</p>`);
+  return blocks.length ? `<div class="replay-sql-evidence">${blocks.join('')}</div>` : '';
+}
+
+function sqlEvidenceBlock(title, value) {
+  return `
+    <article class="replay-sql-block">
+      <strong>${escapeHtml(title)}</strong>
+      <pre>${escapeHtml(prettyJson(value) || '暂无数据')}</pre>
+    </article>
+  `;
+}
+
+function prettyJson(value) {
+  if (!value) return '';
+  if (typeof value !== 'string') return JSON.stringify(value, null, 2);
+  try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
 }
 
 function renderLegacyReplay(task, records) {
@@ -339,7 +408,44 @@ function renderReport(local) {
       </div>
       <pre class="report-pre">${escapeHtml(markdown)}</pre>
     </section>
+    ${renderKnowledgeReferences(local.references)}
   `;
+}
+
+function renderKnowledgeReferences(references) {
+  if (!Array.isArray(references) || references.length === 0) return '';
+  return `
+    <section class="knowledge-references reveal" aria-label="参考知识来源">
+      <div class="plan-head">
+        <div>
+          <p class="panel-label">可追溯证据</p>
+          <h2>参考知识来源</h2>
+        </div>
+        <div class="plan-meta"><span>${references.length} 条命中</span></div>
+      </div>
+      <div class="knowledge-reference-list">
+        ${references.map((reference) => `
+          <article class="knowledge-reference" data-usage="${escapeHtml(reference.usageType || 'RETRIEVED')}">
+            <div class="knowledge-reference-head">
+              <span class="knowledge-citation">${escapeHtml(reference.citationCode)}</span>
+              <div>
+                <strong>${escapeHtml(reference.title || reference.docNo)}</strong>
+                <small>${escapeHtml(reference.sourceType || 'MANUAL')} · 相似度 ${formatScore(reference.similarity)}</small>
+              </div>
+              <span class="knowledge-usage">${reference.usageType === 'CITED' ? '报告已引用' : '检索命中'}</span>
+            </div>
+            ${reference.excerpt ? `<p>${escapeHtml(reference.excerpt)}</p>` : ''}
+            ${reference.sourceRef ? `<footer><i class="ph ph-link" aria-hidden="true"></i>${escapeHtml(reference.sourceRef)}</footer>` : ''}
+          </article>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function formatScore(value) {
+  const score = Number(value);
+  return Number.isFinite(score) ? score.toFixed(3) : '-';
 }
 
 function metaItem(label, value, raw = false) {
@@ -385,6 +491,7 @@ async function loadDetail(local) {
   if (local.detail?.task && !shouldFetchReport(local.detail.task.status)) {
     // 进行中任务无报告，确保报告区域展示「暂未生成」而非报错。
     local.report = null;
+    local.references = [];
     local.reportError = '';
     const downloadBtn = document.querySelector('[data-download]');
     if (downloadBtn) downloadBtn.hidden = true;
@@ -401,12 +508,18 @@ async function loadReport(local) {
   }
   // detail 尚未加载完成时，仍尝试拉取；若任务进行中后端会返回 400，按报告不可用处理。
   try {
-    const report = await requestJson(`${local.apiBase}/api/ai/diagnose/${encodeURIComponent(local.taskNo)}/report`);
+    const [report, references] = await Promise.all([
+      requestJson(`${local.apiBase}/api/ai/diagnose/${encodeURIComponent(local.taskNo)}/report`),
+      requestJson(`${local.apiBase}/api/ai/diagnose/${encodeURIComponent(local.taskNo)}/report/references`)
+        .catch(() => [])
+    ]);
     local.report = report;
+    local.references = Array.isArray(references) ? references : [];
     local.insight = extractInsightSummary(report);
     local.reportError = '';
   } catch (error) {
     local.report = null;
+    local.references = [];
     local.reportError = error.message || '报告不可用';
   }
   const body = document.querySelector('[data-detail-body]');

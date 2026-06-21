@@ -4,6 +4,7 @@
 export function railHtml(active, { bottom } = {}) {
   const overviewActive = active === 'overview' ? ' is-active' : '';
   const studioActive = active === 'studio' ? ' is-active' : '';
+  const knowledgeActive = active === 'knowledge' ? ' is-active' : '';
   const railBottom = bottom ?? `
     <div class="rail-status">
       <span class="rail-state" data-state="ready" aria-hidden="true"></span>
@@ -36,6 +37,13 @@ export function railHtml(active, { bottom } = {}) {
           <span class="rail-item-text">
             <strong>因果诊断</strong>
             <small>AI + Arthas 现场</small>
+          </span>
+        </button>
+        <button class="rail-item${knowledgeActive}" type="button" data-route="/knowledge" aria-label="知识库" title="知识库">
+          <span class="rail-item-icon" aria-hidden="true"><i class="ph ph-books"></i></span>
+          <span class="rail-item-text">
+            <strong>知识库</strong>
+            <small>RAG 参考知识</small>
           </span>
         </button>
       </nav>

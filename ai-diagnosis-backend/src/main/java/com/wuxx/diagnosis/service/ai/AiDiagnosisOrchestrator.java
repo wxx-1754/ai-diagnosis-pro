@@ -17,12 +17,15 @@ import com.wuxx.diagnosis.domain.ai.AiDiagnoseResponse;
 import com.wuxx.diagnosis.domain.ai.DiagnoseIntentResult;
 import com.wuxx.diagnosis.domain.ai.DiagnosisInsightSummary;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
+import com.wuxx.diagnosis.knowledge.domain.ReportKnowledgeReference;
+import com.wuxx.diagnosis.knowledge.mapper.DiagnoseReportReferenceMapper;
 import com.wuxx.diagnosis.service.DiagnoseReportService;
 import com.wuxx.diagnosis.service.DiagnoseTaskService;
 import com.wuxx.diagnosis.service.RuleBasedDiagnoseExecutor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -49,6 +52,13 @@ public class AiDiagnosisOrchestrator {
     private final ObjectMapper objectMapper;
 
     private final DiagnosisAiProperties properties;
+
+    private DiagnoseReportReferenceMapper reportReferenceMapper;
+
+    @Autowired(required = false)
+    public void setReportReferenceMapper(DiagnoseReportReferenceMapper reportReferenceMapper) {
+        this.reportReferenceMapper = reportReferenceMapper;
+    }
 
     public AiDiagnoseResponse diagnose(AiDiagnoseRequest request) {
         DiagnoseIntentResult intent = intentClassifier.classify(
@@ -107,6 +117,7 @@ public class AiDiagnosisOrchestrator {
                     .reportMarkdown(reportMarkdown)
                     .conclusion(summary)
                     .insightSummary(insightSummary)
+                    .references(references(task.getTaskNo()))
                     .build();
         } catch (Exception exception) {
             log.error("AI report generation failed, taskNo={}", task.getTaskNo(), exception);
@@ -146,6 +157,7 @@ public class AiDiagnosisOrchestrator {
                 .reportMarkdown(reportMarkdown)
                 .conclusion(summary)
                 .insightSummary(insightSummary)
+                .references(references(taskNo))
                 .build();
     }
 
@@ -209,5 +221,9 @@ public class AiDiagnosisOrchestrator {
 
     private String nullToDefault(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value : defaultValue;
+    }
+
+    private List<ReportKnowledgeReference> references(String taskNo) {
+        return reportReferenceMapper == null ? List.of() : reportReferenceMapper.findByTaskNo(taskNo);
     }
 }

@@ -12,6 +12,8 @@ import com.wuxx.diagnosis.domain.DiagnoseType;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
 import com.wuxx.diagnosis.mapper.DiagnoseReportMapper;
 import com.wuxx.diagnosis.mapper.DiagnoseTaskMapper;
+import com.wuxx.diagnosis.sql.mapper.SqlDiagnosisRecordMapper;
+import com.wuxx.diagnosis.sql.mapper.SqlToolCallRecordMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,21 +30,29 @@ public class DiagnoseTaskService {
 
     private final DiagnoseEventService diagnoseEventService;
 
+    private final SqlDiagnosisRecordMapper sqlDiagnosisRecordMapper;
+
+    private final SqlToolCallRecordMapper sqlToolCallRecordMapper;
+
     @Autowired
     public DiagnoseTaskService(DiagnoseTaskMapper diagnoseTaskMapper,
                                ArthasCommandRecordMapper arthasCommandRecordMapper,
                                DiagnoseReportMapper diagnoseReportMapper,
-                               DiagnoseEventService diagnoseEventService) {
+                               DiagnoseEventService diagnoseEventService,
+                               SqlDiagnosisRecordMapper sqlDiagnosisRecordMapper,
+                               SqlToolCallRecordMapper sqlToolCallRecordMapper) {
         this.diagnoseTaskMapper = diagnoseTaskMapper;
         this.arthasCommandRecordMapper = arthasCommandRecordMapper;
         this.diagnoseReportMapper = diagnoseReportMapper;
         this.diagnoseEventService = diagnoseEventService;
+        this.sqlDiagnosisRecordMapper = sqlDiagnosisRecordMapper;
+        this.sqlToolCallRecordMapper = sqlToolCallRecordMapper;
     }
 
     public DiagnoseTaskService(DiagnoseTaskMapper diagnoseTaskMapper,
                                ArthasCommandRecordMapper arthasCommandRecordMapper,
                                DiagnoseReportMapper diagnoseReportMapper) {
-        this(diagnoseTaskMapper, arthasCommandRecordMapper, diagnoseReportMapper, null);
+        this(diagnoseTaskMapper, arthasCommandRecordMapper, diagnoseReportMapper, null, null, null);
     }
 
     public DiagnoseTaskCreateResponse createTask(DiagnoseTaskCreateRequest request) {
@@ -123,6 +133,12 @@ public class DiagnoseTaskService {
         }
         arthasCommandRecordMapper.deleteByTaskNo(taskNo);
         diagnoseReportMapper.deleteByTaskNo(taskNo);
+        if (sqlToolCallRecordMapper != null) {
+            sqlToolCallRecordMapper.deleteByTaskNo(taskNo);
+        }
+        if (sqlDiagnosisRecordMapper != null) {
+            sqlDiagnosisRecordMapper.deleteByTaskNo(taskNo);
+        }
         if (diagnoseEventService != null) {
             diagnoseEventService.deleteByTaskNo(taskNo);
         }

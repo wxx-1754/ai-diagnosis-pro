@@ -79,6 +79,19 @@ public class ArthasCommandGuard {
         }
     }
 
+    public void checkUnrestricted(String command, int maxLength) {
+        if (command == null || command.trim().isEmpty()) {
+            throw new IllegalArgumentException("Arthas command cannot be empty");
+        }
+        String normalized = command.trim();
+        if (normalized.length() > maxLength) {
+            throw new SecurityException("Arthas command length exceeds limit: " + maxLength);
+        }
+        if (normalized.chars().anyMatch(value -> value == 0 || value == '\r' || value == '\n')) {
+            throw new SecurityException("Arthas command contains invalid control characters");
+        }
+    }
+
     private void checkThreadTopCommand(String command) {
         String[] parts = command.split("\\s+");
         if (parts.length != 3 || !"thread".equals(parts[0]) || !"-n".equals(parts[1])) {

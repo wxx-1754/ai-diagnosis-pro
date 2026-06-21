@@ -1,0 +1,542 @@
+/* 知识库管理页。
+ * 严格复用全站设计 token（surface / line / blue / radius），单一强调色 blue，
+ * 形状锁 8px(卡片/输入/按钮) + 999px(状态胶囊)，深色主题与主诊断页一致。
+ */
+
+.knowledge-workspace {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+/* ===== 顶栏：与主诊断页 topbar 同构（标题左、工具右） ===== */
+.knowledge-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: minmax(240px, 0.5fr) minmax(420px, 1fr);
+  gap: 16px;
+  align-items: center;
+  min-height: 74px;
+}
+
+.knowledge-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.token-field {
+  display: grid;
+  gap: 5px;
+  flex: 1;
+  min-width: 220px;
+}
+
+.token-field > span {
+  color: var(--muted);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.token-field input {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(6 12 18 / 0.55);
+  color: var(--ink);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 13px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.token-field input:focus {
+  outline: none;
+  border-color: rgb(83 145 255 / 0.7);
+  box-shadow: 0 0 0 3px rgb(52 125 255 / 0.18);
+}
+
+/* ===== 主内容双栏：左操作（上传+检索），右文档列表 ===== */
+.kb-grid {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.82fr) minmax(540px, 1.18fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.kb-col {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.kb-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.012)),
+    rgb(8 14 20 / 0.78);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  padding: 16px;
+}
+
+.kb-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.kb-panel-head .panel-label {
+  margin: 0;
+}
+
+/* ===== Tab 切换（文本 / 文件） ===== */
+.kb-tabs {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(6 12 18 / 0.55);
+}
+
+.kb-tab {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.kb-tab.is-active {
+  background: rgb(52 125 255 / 0.18);
+  color: #dce9ff;
+}
+
+/* ===== 表单：label 在上，input 在下（Section 4.6） ===== */
+.kb-form {
+  display: grid;
+  gap: 12px;
+}
+
+/* .kb-form 的 display:grid 会覆盖 UA 的 [hidden]{display:none}，
+   导致 Tab 切换时两个 form 同时显示，必须显式恢复 hidden 行为。 */
+.kb-form[hidden] {
+  display: none;
+}
+
+.kb-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kb-field > span {
+  color: var(--muted);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.kb-field input,
+.kb-field select,
+.kb-field textarea {
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(6 12 18 / 0.55);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.kb-field textarea {
+  resize: vertical;
+  min-height: 132px;
+  line-height: 1.55;
+}
+
+.kb-field input:focus,
+.kb-field select:focus,
+.kb-field textarea:focus {
+  outline: none;
+  border-color: rgb(83 145 255 / 0.7);
+  box-shadow: 0 0 0 3px rgb(52 125 255 / 0.18);
+}
+
+.kb-field input::placeholder,
+.kb-field textarea::placeholder {
+  color: var(--faint);
+}
+
+.kb-field-wide {
+  grid-column: 1 / -1;
+}
+
+/* 自定义分类输入框：默认隐藏，选「自定义...」时显示，不破坏 field-row 网格。 */
+.kb-field-custom[hidden] {
+  display: none;
+}
+
+.kb-field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.kb-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.kb-hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+/* ===== 文档列表 ===== */
+.kb-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kb-filters select {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(6 12 18 / 0.55);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.kb-list {
+  display: grid;
+  gap: 10px;
+}
+
+/* 状态：空 / 加载 / 错误（Section 4.5） */
+.kb-state {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 36px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.kb-state i {
+  font-size: 26px;
+  color: var(--faint);
+}
+
+.kb-state.is-error {
+  color: var(--red);
+}
+
+.kb-state.is-error i {
+  color: var(--red);
+}
+
+/* 骨架（加载态，匹配最终卡片形状） */
+.kb-skeleton {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(6 12 18 / 0.4);
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.kb-skeleton-line {
+  height: 12px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.04), rgb(255 255 255 / 0.09), rgb(255 255 255 / 0.04));
+  background-size: 200% 100%;
+  animation: kb-shimmer 1.4s ease-in-out infinite;
+}
+
+.kb-skeleton-line.short { width: 45%; }
+.kb-skeleton-line.mid { width: 72%; }
+
+@keyframes kb-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kb-skeleton-line { animation: none; }
+}
+
+/* 单条文档卡片 */
+.kb-doc {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(6 12 18 / 0.45);
+  padding: 14px 16px;
+  display: grid;
+  gap: 12px;
+  transition: border-color 160ms ease;
+}
+
+.kb-doc:hover {
+  border-color: var(--line-strong);
+}
+
+.kb-doc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kb-doc-title {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.kb-doc-title strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-doc-title small {
+  color: var(--faint);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+/* 状态胶囊：形状锁 999px，色系锁 green/amber/red/neutral */
+.kb-status {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.kb-status[data-tone='green'] { background: rgb(102 216 120 / 0.16); color: #8be89a; }
+.kb-status[data-tone='amber'] { background: rgb(255 159 67 / 0.16); color: #ffc187; }
+.kb-status[data-tone='red'] { background: rgb(255 107 107 / 0.16); color: #ff9b9b; }
+.kb-status[data-tone='neutral'] { background: rgb(147 164 181 / 0.14); color: #b6c2cf; }
+
+/* 元数据：label/value 小网格，避免 middot 堆叠 */
+.kb-doc-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.kb-meta-item {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  background: rgb(8 14 20 / 0.6);
+}
+
+.kb-meta-item .kb-meta-label {
+  color: var(--faint);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.kb-meta-item .kb-meta-value {
+  color: var(--ink);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-meta-item .kb-meta-value.is-muted {
+  color: var(--faint);
+}
+
+.kb-doc-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgb(255 107 107 / 0.1);
+  color: #ff9b9b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 卡片操作区 */
+.kb-doc-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kb-doc-actions .ghost-button {
+  min-height: 30px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.kb-doc-actions .kb-danger {
+  color: var(--red);
+}
+
+.kb-doc-actions .kb-danger:hover {
+  border-color: rgb(255 107 107 / 0.5);
+}
+
+/* 分片就地展开区：贴在卡片内部，与检索结果区完全隔离。 */
+.kb-chunk-view {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
+}
+
+.kb-chunk-view[hidden] {
+  display: none;
+}
+
+.kb-chunk-view-head {
+  color: #8fb7ff;
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.kb-chunk-view .kb-chunk-content {
+  max-height: 200px;
+}
+
+/* 列表分页 */
+.kb-list-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.kb-list-footer .ghost-button {
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.kb-list-footer .ghost-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ===== 检索结果 ===== */
+.kb-search-results {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.kb-results-title {
+  margin: 0 0 2px;
+  color: #8fb7ff;
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.kb-search-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(6 12 18 / 0.45);
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.kb-search-item .kb-doc-head {
+  align-items: center;
+}
+
+.kb-search-item .kb-doc-title small {
+  color: var(--green);
+}
+
+.kb-chunk-content {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.3);
+  color: var(--ink);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* ===== Toast ===== */
+.kb-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(12px);
+  z-index: 60;
+  padding: 11px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink);
+  font-size: 13px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.kb-toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.kb-toast.is-error {
+  border-color: rgb(255 107 107 / 0.5);
+  color: #ff9b9b;
+}
+
+/* ===== 响应式：双栏在窄屏折叠为单列 ===== */
+@media (max-width: 1100px) {
+  .knowledge-topbar {
+    grid-template-columns: 1fr;
+  }
+  .kb-grid {
+    grid-template-columns: 1fr;
+  }
+}

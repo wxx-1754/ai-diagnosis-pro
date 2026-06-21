@@ -1,5 +1,8 @@
 package com.wuxx.diagnosis.config;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -20,4 +23,17 @@ public class DiagnosisArthasProperties {
     private int maxOutputLength = 20000;
 
     private int auditOutputExcerptLength = 4000;
+
+    /**
+     * 开发/测试诊断沙箱开关。开启后 AI 可以提交原生 Arthas 命令。
+     */
+    private boolean unrestrictedAiCommandsEnabled = false;
+
+    private List<String> unrestrictedAiEnvironments = new ArrayList<>(List.of("dev", "test"));
+
+    private int unrestrictedAiMaxCommandLength = 4000;
+
+    private int unrestrictedAiMaxCallsPerTask = 12;
+
+    private int unrestrictedAiExecTimeoutMs = 90000;
 }

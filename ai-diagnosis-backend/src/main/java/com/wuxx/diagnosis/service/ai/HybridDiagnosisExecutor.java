@@ -44,11 +44,15 @@ public class HybridDiagnosisExecutor {
         int recordCountBefore = findRecords(taskNo).size();
         try {
             diagnoseTaskService.markRunning(taskNo);
+            log.info("Tool Calling diagnosis started, taskNo={}, diagnoseType={}, targetClass={}, targetMethod={}",
+                    taskNo, task.getDiagnoseType(), task.getTargetClass(), task.getTargetMethod());
             String aiResult = toolCallingDiagnosisAgent.diagnose(task);
             List<ArthasCommandRecord> newRecords = findRecords(taskNo).stream()
                     .skip(recordCountBefore)
                     .toList();
 
+            log.info("Tool Calling diagnosis raw result, taskNo={}, newRecordCount={}, aiResultBlank={}",
+                    taskNo, newRecords.size(), !StringUtils.hasText(aiResult));
             if (!StringUtils.hasText(aiResult) || newRecords.isEmpty()) {
                 return fallbackToRule(taskNo, "AI Tool Calling 未调用任何工具");
             }
@@ -56,6 +60,7 @@ public class HybridDiagnosisExecutor {
                 return fallbackToRule(taskNo, "AI Tool Calling 存在失败工具调用");
             }
 
+            log.info("Tool Calling diagnosis succeeded, taskNo={}, arthasRecordCount={}", taskNo, newRecords.size());
             return DiagnoseRunResponse.builder()
                     .taskNo(taskNo)
                     .status(DiagnoseTaskStatus.FINISHED.name())

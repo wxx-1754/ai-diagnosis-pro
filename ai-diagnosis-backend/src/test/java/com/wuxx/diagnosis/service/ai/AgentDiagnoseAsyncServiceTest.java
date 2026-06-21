@@ -91,7 +91,10 @@ class AgentDiagnoseAsyncServiceTest {
                 mock(DiagnosisInsightSummarizer.class),
                 new ObjectMapper(),
                 registry,
-                eventService
+                eventService,
+                mock(com.wuxx.diagnosis.sql.mapper.SqlDiagnosisRecordMapper.class),
+                mock(com.wuxx.diagnosis.sql.ai.JavaSqlJointReportGenerator.class),
+                mock(com.wuxx.diagnosis.sql.security.SqlSensitiveDataMasker.class)
         );
     }
 

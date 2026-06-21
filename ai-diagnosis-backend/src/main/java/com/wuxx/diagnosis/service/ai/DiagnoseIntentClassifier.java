@@ -5,12 +5,14 @@ import com.wuxx.diagnosis.config.DiagnosisAiProperties;
 import com.wuxx.diagnosis.domain.DiagnoseType;
 import com.wuxx.diagnosis.domain.ai.DiagnoseIntentResult;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "diagnosis.ai", name = "enable", havingValue = "true")
@@ -45,6 +47,7 @@ public class DiagnoseIntentClassifier {
 
     public DiagnoseIntentResult classify(String question, String targetClass, String targetMethod) {
         ensureEnabled();
+        log.info("Intent classifying, question={}, targetClass={}, targetMethod={}", question, targetClass, targetMethod);
         String response = chatClient.prompt()
                 .options(OpenAiChatOptions.builder()
                         .temperature(properties.getIntentTemperature())
@@ -82,8 +85,12 @@ public class DiagnoseIntentClassifier {
                 return fallback("AI 返回为空");
             }
             normalize(result);
+            log.info("Intent classified, type={}, confidence={}, reason={}, targetClass={}, targetMethod={}",
+                    result.getDiagnoseType(), result.getConfidence(), result.getReason(),
+                    result.getTargetClass(), result.getTargetMethod());
             return result;
         } catch (Exception exception) {
+            log.warn("Intent parse failed, rawResponse={}, message={}", response, exception.getMessage());
             return fallback("AI 返回解析失败：" + exception.getMessage());
         }
     }

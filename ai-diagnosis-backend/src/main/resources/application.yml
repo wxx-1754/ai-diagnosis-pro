@@ -5,6 +5,8 @@ spring:
   application:
     name: ai-diagnosis-backend
   ai:
+    model:
+      embedding: ${AI_EMBEDDING_PROVIDER:openai}
     openai:
       api-key: ${AI_API_KEY:}
       base-url: ${AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
@@ -12,11 +14,20 @@ spring:
         options:
           model: ${AI_CHAT_MODEL:qwen-plus}
           temperature: ${AI_CHAT_TEMPERATURE:0.1}
+      embedding:
+        options:
+          model: ${AI_EMBEDDING_MODEL:text-embedding-v3}
+          dimensions: ${DIAGNOSIS_KB_EMBEDDING_DIM:1024}
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:ai_diagnosis}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: "20260620.2"
+    validate-on-migrate: true
 
 mybatis:
   configuration:
@@ -28,6 +39,10 @@ logging:
   level:
     root: ${LOG_LEVEL_ROOT:INFO}
     com.wuxx.diagnosis: ${LOG_LEVEL_APP:INFO}
+    # Spring AI 工具调用内部过程（模型选择工具、传参、工具返回）日志。
+    # 排查 Agent 行为时设为 DEBUG：LOG_LEVEL_SPRING_AI=DEBUG
+    org.springframework.ai: ${LOG_LEVEL_SPRING_AI:INFO}
+    org.springframework.web.client: INFO
     org.mybatis: INFO
     org.springframework.jdbc: INFO
 
@@ -48,3 +63,36 @@ diagnosis:
     trace-exec-timeout-ms: ${DIAGNOSIS_ARTHAS_TRACE_EXEC_TIMEOUT_MS:90000}
     max-output-length: ${DIAGNOSIS_ARTHAS_MAX_OUTPUT_LENGTH:20000}
     audit-output-excerpt-length: ${DIAGNOSIS_ARTHAS_AUDIT_OUTPUT_EXCERPT_LENGTH:4000}
+    unrestricted-ai-commands-enabled: ${DIAGNOSIS_ARTHAS_UNRESTRICTED_AI_COMMANDS_ENABLED:true}
+    unrestricted-ai-environments: ${DIAGNOSIS_ARTHAS_UNRESTRICTED_AI_ENVIRONMENTS:dev,test}
+    unrestricted-ai-max-command-length: ${DIAGNOSIS_ARTHAS_UNRESTRICTED_AI_MAX_COMMAND_LENGTH:4000}
+    unrestricted-ai-max-calls-per-task: ${DIAGNOSIS_ARTHAS_UNRESTRICTED_AI_MAX_CALLS_PER_TASK:12}
+    unrestricted-ai-exec-timeout-ms: ${DIAGNOSIS_ARTHAS_UNRESTRICTED_AI_EXEC_TIMEOUT_MS:90000}
+  sql:
+    enabled: ${DIAGNOSIS_SQL_ENABLED:true}
+    admin-enabled: ${DIAGNOSIS_SQL_ADMIN_ENABLED:true}
+    admin-token: ${DIAGNOSIS_SQL_ADMIN_TOKEN:eu+TssFNjl8KO2x9jp8KGyw9Tl9qe4ydDh8qO0xdbn8=}
+    encryption-key: ${DIAGNOSIS_SQL_ENCRYPTION_KEY:jzx7Kh0On4p7bF1OM9oL0NjugWpVvD0uHwqYjH1uX0o=}
+    max-sql-length: ${DIAGNOSIS_SQL_MAX_LENGTH:20000}
+    connect-timeout-ms: ${DIAGNOSIS_SQL_CONNECT_TIMEOUT_MS:3000}
+    validation-timeout-ms: ${DIAGNOSIS_SQL_VALIDATION_TIMEOUT_MS:2000}
+    query-timeout-seconds: ${DIAGNOSIS_SQL_QUERY_TIMEOUT_SECONDS:15}
+    maximum-pool-size: ${DIAGNOSIS_SQL_MAX_POOL_SIZE:3}
+    # SQL 诊断证据门禁阈值：trace 中 MyBatis/JDBC 节点耗时占比/绝对耗时达标才允许进入 SQL 诊断
+    evidence-min-cost-percent: ${DIAGNOSIS_SQL_EVIDENCE_MIN_COST_PERCENT:30}
+    evidence-min-cost-millis: ${DIAGNOSIS_SQL_EVIDENCE_MIN_COST_MILLIS:100}
+  kb:
+    enabled: ${DIAGNOSIS_KB_ENABLED:true}
+    admin-enabled: ${DIAGNOSIS_KB_ADMIN_ENABLED:true}
+    admin-token: ${DIAGNOSIS_KB_ADMIN_TOKEN:K9#mQ!2xP$8vL%1zW&5nT*0bY@7cC_4s}
+    chunk-size: ${DIAGNOSIS_KB_CHUNK_SIZE:500}
+    chunk-overlap: ${DIAGNOSIS_KB_CHUNK_OVERLAP:80}
+    retrieve-top-k: ${DIAGNOSIS_KB_TOP_K:5}
+    candidate-multiplier: ${DIAGNOSIS_KB_CANDIDATE_MULTIPLIER:4}
+    min-score: ${DIAGNOSIS_KB_MIN_SCORE:0.55}
+    max-context-length: ${DIAGNOSIS_KB_MAX_CONTEXT_LENGTH:10000}
+    auto-ingest-history: ${DIAGNOSIS_KB_AUTO_INGEST_HISTORY:true}
+    history-min-content-length: ${DIAGNOSIS_KB_HISTORY_MIN_CONTENT_LENGTH:200}
+    embedding-model: ${AI_EMBEDDING_MODEL:text-embedding-v3}
+    embedding-dimension: ${DIAGNOSIS_KB_EMBEDDING_DIM:1024}
+    vector-store-file: ${DIAGNOSIS_KB_VECTOR_FILE:data/kb-simple-vector-store.json}
