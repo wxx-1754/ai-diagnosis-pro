@@ -12,7 +12,13 @@ public class SqlDatasourceUpsertRequest {
     @NotBlank(message = "datasourceName不能为空")
     private String datasourceName;
 
-    @NotBlank(message = "jdbcUrl不能为空")
+    @NotBlank(message = "appId不能为空")
+    private String appId;
+
+    /**
+     * 新建时必填；更新时允许留空，表示保留数据库中的原始 JDBC URL。
+     * 不能使用列表接口返回的 jdbcUrlMasked 回写。
+     */
     private String jdbcUrl;
 
     @NotBlank(message = "username不能为空")

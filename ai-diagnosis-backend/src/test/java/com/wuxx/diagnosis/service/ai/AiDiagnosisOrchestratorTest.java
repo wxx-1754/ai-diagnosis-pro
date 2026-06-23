@@ -250,6 +250,11 @@ class AiDiagnosisOrchestratorTest {
         public int deleteByTaskNo(String taskNo) {
             return 0;
         }
+
+        @Override
+        public long countByAppIdAndEnv(String appId, String env) {
+            return 0;
+        }
     }
 
     private static class CapturingReportMapper implements DiagnoseReportMapper {

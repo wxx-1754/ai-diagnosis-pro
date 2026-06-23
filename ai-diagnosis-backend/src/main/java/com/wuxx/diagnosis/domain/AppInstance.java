@@ -23,6 +23,9 @@ public class AppInstance {
 
     private String arthasPassword;
 
+    /** AES-GCM 密文（v1: 前缀 + Base64）。优先使用；为空时回退 arthasPassword 兼容存量明文。 */
+    private String passwordCipher;
+
     private String arthasAgentId;
 
     private String accessMode;

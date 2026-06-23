@@ -54,8 +54,8 @@ public class SqlAgentDiagnosticTools {
         diagnoseTaskService.checkTaskAppEnv(taskNo, appId, env);
         evidenceGate.verify(taskNo);
         send(taskNo, DiagnoseEventType.SQL_DATASOURCE_SELECTING,
-                "Agent 正在匹配 SQL 诊断数据源", Map.of("env", env));
-        List<SqlDatasourceOption> options = datasourceService.options(env);
+                "Agent 正在匹配 SQL 诊断数据源", Map.of("appId", appId, "env", env));
+        List<SqlDatasourceOption> options = datasourceService.options(appId, env);
         if (options.size() == 1) {
             send(taskNo, DiagnoseEventType.SQL_DATASOURCE_SELECTED,
                     "已自动选择数据源：" + options.get(0).getDatasourceName(), options.get(0));
@@ -88,7 +88,7 @@ public class SqlAgentDiagnosticTools {
         diagnoseTaskService.checkTaskAppEnv(taskNo, appId, env);
         evidenceGate.verify(taskNo);
         DiagnoseTask task = diagnoseTaskService.getByTaskNo(taskNo);
-        SqlDatasourceConfig datasource = datasourceService.getEnabled(datasourceCode, task.getEnv());
+        SqlDatasourceConfig datasource = datasourceService.getEnabled(datasourceCode, task.getAppId(), task.getEnv());
         String normalizedSql = safetyChecker.checkExplainableSelect(sql);
         String tableName = safetyChecker.checkTableName(mainTableName);
         send(taskNo, DiagnoseEventType.SQL_DATASOURCE_SELECTED,

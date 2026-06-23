@@ -36,4 +36,15 @@ public class DiagnosisArthasProperties {
     private int unrestrictedAiMaxCallsPerTask = 12;
 
     private int unrestrictedAiExecTimeoutMs = 90000;
+
+    private Tunnel tunnel = new Tunnel();
+
+    @Getter
+    @Setter
+    public static class Tunnel {
+
+        private String wsUrl = "ws://127.0.0.1:7777/ws";
+
+        private String webUrl = "http://127.0.0.1:8080";
+    }
 }

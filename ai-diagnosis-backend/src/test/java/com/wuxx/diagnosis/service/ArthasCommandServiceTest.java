@@ -18,10 +18,16 @@ import com.wuxx.diagnosis.domain.ArthasExecuteRequest;
 import com.wuxx.diagnosis.domain.ArthasExecuteResponse;
 import com.wuxx.diagnosis.domain.DiagnoseTask;
 import com.wuxx.diagnosis.domain.DiagnoseTaskStatus;
+import com.wuxx.diagnosis.mapper.AppInstanceMapper;
 import com.wuxx.diagnosis.mapper.ArthasCommandRecordMapper;
 import com.wuxx.diagnosis.mapper.DiagnoseTaskMapper;
 import com.wuxx.diagnosis.sse.DiagnoseSseManager;
+import com.wuxx.diagnosis.sql.security.PasswordCipherService;
 import org.junit.jupiter.api.Test;
+
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ArthasCommandServiceTest {
 
@@ -119,7 +125,10 @@ class ArthasCommandServiceTest {
     private ArthasCommandService service(ArthasCommandExecutor executor,
                                          ArthasCommandRecordMapper recordMapper,
                                          DiagnoseTaskMapper diagnoseTaskMapper) {
-        AppInstanceService appInstanceService = new AppInstanceService((appId, env) -> instance());
+        AppInstanceMapper appInstanceMapper = mock(AppInstanceMapper.class);
+        when(appInstanceMapper.findOnlineByAppIdAndEnv(anyString(), anyString())).thenReturn(instance());
+        PasswordCipherService cipherService = mock(PasswordCipherService.class);
+        AppInstanceService appInstanceService = new AppInstanceService(appInstanceMapper, cipherService);
         DiagnosisArthasProperties properties = new DiagnosisArthasProperties();
         properties.setAuditOutputExcerptLength(8);
         return new ArthasCommandService(
@@ -208,6 +217,11 @@ class ArthasCommandServiceTest {
 
         @Override
         public int deleteByTaskNo(String taskNo) {
+            return 0;
+        }
+
+        @Override
+        public long countByAppIdAndEnv(String appId, String env) {
             return 0;
         }
     }

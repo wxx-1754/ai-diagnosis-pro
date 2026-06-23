@@ -14,6 +14,7 @@ import com.wuxx.diagnosis.sql.mapper.SqlDiagnosisRecordMapper;
 import com.wuxx.diagnosis.sql.security.PasswordCipherService;
 import com.zaxxer.hikari.HikariDataSource;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -26,14 +27,18 @@ public class SqlDatasourceService {
     private final PasswordCipherService passwordCipherService;
     private final DynamicSqlDatasourceFactory datasourceFactory;
 
-    public List<SqlDatasourceOption> options(String env) {
+    public List<SqlDatasourceOption> options(String appId, String env) {
+        if (!StringUtils.hasText(appId)) {
+            throw new IllegalArgumentException("appId不能为空");
+        }
         if (!StringUtils.hasText(env)) {
             throw new IllegalArgumentException("env不能为空");
         }
-        return mapper.findEnabledByEnv(env.trim()).stream()
+        return mapper.findEnabledByAppAndEnv(appId.trim(), env.trim()).stream()
                 .map(item -> SqlDatasourceOption.builder()
                         .datasourceCode(item.getDatasourceCode())
                         .datasourceName(item.getDatasourceName())
+                        .appId(item.getAppId())
                         .dbType(item.getDbType())
                         .env(item.getEnv())
                         .build())
@@ -46,11 +51,13 @@ public class SqlDatasourceService {
 
     public SqlDatasourceView create(SqlDatasourceUpsertRequest request) {
         validate(request, true);
-        if (mapper.findByCodeAndEnv(request.getDatasourceCode().trim(), request.getEnv().trim()) != null) {
-            throw new IllegalStateException("相同环境下数据源编码已存在");
+        SqlDatasourceConfig existing = mapper.findByCodeAndEnv(request.getDatasourceCode().trim(), request.getEnv().trim());
+        if (existing != null && existing.getAppId().equals(request.getAppId().trim())) {
+            throw new IllegalStateException("相同应用+环境下数据源编码已存在");
         }
         LocalDateTime now = LocalDateTime.now();
         SqlDatasourceConfig config = fromRequest(request, null);
+        config.setJdbcUrl(request.getJdbcUrl().trim());
         config.setPasswordCipher(passwordCipherService.encrypt(request.getPassword()));
         config.setCreatedAt(now);
         config.setUpdatedAt(now);
@@ -62,10 +69,13 @@ public class SqlDatasourceService {
         SqlDatasourceConfig existing = getById(id);
         validate(request, false);
         SqlDatasourceConfig duplicate = mapper.findByCodeAndEnv(request.getDatasourceCode().trim(), request.getEnv().trim());
-        if (duplicate != null && !duplicate.getId().equals(id)) {
-            throw new IllegalStateException("相同环境下数据源编码已存在");
+        if (duplicate != null && !duplicate.getId().equals(id) && duplicate.getAppId().equals(request.getAppId().trim())) {
+            throw new IllegalStateException("相同应用+环境下数据源编码已存在");
         }
         SqlDatasourceConfig config = fromRequest(request, id);
+        config.setJdbcUrl(StringUtils.hasText(request.getJdbcUrl())
+                ? request.getJdbcUrl().trim()
+                : existing.getJdbcUrl());
         config.setPasswordCipher(StringUtils.hasText(request.getPassword())
                 ? passwordCipherService.encrypt(request.getPassword())
                 : existing.getPasswordCipher());
@@ -89,14 +99,19 @@ public class SqlDatasourceService {
     public void testConnection(Long id) {
         SqlDatasourceConfig config = getById(id);
         try (HikariDataSource dataSource = datasourceFactory.createUncached(config)) {
-            new org.springframework.jdbc.core.JdbcTemplate(dataSource).queryForObject("SELECT 1", Integer.class);
+            new JdbcTemplate(dataSource).queryForObject("SELECT 1", Integer.class);
         }
     }
 
-    public SqlDatasourceConfig getEnabled(String datasourceCode, String env) {
+    public SqlDatasourceConfig getEnabled(String datasourceCode, String appId, String env) {
         SqlDatasourceConfig config = mapper.findByCodeAndEnv(datasourceCode, env);
         if (config == null || !"ENABLED".equals(config.getStatus())) {
             throw new IllegalArgumentException("数据源不存在或未启用：" + datasourceCode + ", env=" + env);
+        }
+        // 强绑定归属校验：数据源必须属于当前诊断的 app，杜绝跨应用使用他人的库。
+        if (!config.getAppId().equals(appId)) {
+            throw new SecurityException("数据源不属于当前应用，datasourceCode=" + datasourceCode
+                    + ", appId=" + appId + ", env=" + env);
         }
         if (!"MYSQL".equals(config.getDbType())) {
             throw new IllegalArgumentException("当前仅支持 MYSQL 数据源");
@@ -116,16 +131,28 @@ public class SqlDatasourceService {
         if (passwordRequired && !StringUtils.hasText(request.getPassword())) {
             throw new IllegalArgumentException("password不能为空");
         }
+        if (passwordRequired && !StringUtils.hasText(request.getJdbcUrl())) {
+            throw new IllegalArgumentException("jdbcUrl不能为空");
+        }
         if (!request.getDatasourceCode().matches("[A-Za-z][A-Za-z0-9_-]{1,63}")) {
             throw new IllegalArgumentException("datasourceCode格式无效");
+        }
+        if (!request.getAppId().matches("[A-Za-z][A-Za-z0-9_-]{1,63}")) {
+            throw new IllegalArgumentException("appId格式无效");
         }
         if (!request.getEnv().matches("[A-Za-z][A-Za-z0-9_-]{1,31}")) {
             throw new IllegalArgumentException("env格式无效");
         }
         String status = normalizeStatus(request.getStatus());
         request.setStatus(status);
-        if (!request.getJdbcUrl().startsWith("jdbc:mysql://")) {
-            throw new IllegalArgumentException("当前只允许 jdbc:mysql:// 数据源");
+        if (StringUtils.hasText(request.getJdbcUrl())) {
+            String jdbcUrl = request.getJdbcUrl().trim();
+            if (jdbcUrl.toLowerCase(Locale.ROOT).contains("<redacted>")) {
+                throw new IllegalArgumentException("jdbcUrl不能使用脱敏值，请输入完整URL或更新时留空");
+            }
+            if (!jdbcUrl.startsWith("jdbc:mysql://")) {
+                throw new IllegalArgumentException("当前只允许 jdbc:mysql:// 数据源");
+            }
         }
     }
 
@@ -134,8 +161,8 @@ public class SqlDatasourceService {
         config.setId(id);
         config.setDatasourceCode(request.getDatasourceCode().trim());
         config.setDatasourceName(request.getDatasourceName().trim());
+        config.setAppId(request.getAppId().trim());
         config.setDbType("MYSQL");
-        config.setJdbcUrl(request.getJdbcUrl().trim());
         config.setUsername(request.getUsername().trim());
         config.setEnv(request.getEnv().trim());
         config.setStatus(normalizeStatus(request.getStatus()));
@@ -155,6 +182,7 @@ public class SqlDatasourceService {
                 .id(config.getId())
                 .datasourceCode(config.getDatasourceCode())
                 .datasourceName(config.getDatasourceName())
+                .appId(config.getAppId())
                 .dbType(config.getDbType())
                 .jdbcUrlMasked(maskJdbcUrl(config.getJdbcUrl()))
                 .username(config.getUsername())

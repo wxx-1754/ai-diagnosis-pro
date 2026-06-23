@@ -4,6 +4,7 @@ import { createEmptyInsightSummary, extractInsightSummary } from './insight-summ
 import { mountOverview } from './overview.js';
 import { mountEventDetail } from './event-detail.js';
 import { mountKnowledge } from './knowledge.js';
+import { mountAdmin } from './admin.js';
 import { railHtml } from './rail.js';
 import './styles.css';
 
@@ -1719,6 +1720,13 @@ function handleRoute() {
   if (root === 'knowledge') {
     mountKnowledge(app, { apiBase: state.apiBase, query });
     activeView = 'knowledge';
+    window.scrollTo({ top: 0 });
+    return;
+  }
+
+  if (root === 'admin') {
+    mountAdmin(app, { apiBase: state.apiBase, query });
+    activeView = 'admin';
     window.scrollTo({ top: 0 });
     return;
   }

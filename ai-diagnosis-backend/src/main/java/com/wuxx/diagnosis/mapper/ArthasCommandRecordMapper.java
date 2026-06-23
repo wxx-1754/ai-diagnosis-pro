@@ -66,4 +66,10 @@ public interface ArthasCommandRecordMapper {
             WHERE task_no = #{taskNo}
             """)
     int deleteByTaskNo(@Param("taskNo") String taskNo);
+
+    @Select("""
+            SELECT COUNT(*) FROM arthas_command_record
+            WHERE app_id = #{appId} AND env = #{env}
+            """)
+    long countByAppIdAndEnv(@Param("appId") String appId, @Param("env") String env);
 }

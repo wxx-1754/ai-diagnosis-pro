@@ -12,7 +12,8 @@ public class ArthasCommandGuard {
             "thread",
             "jvm",
             "memory",
-            "trace"
+            "trace",
+            "version"
     );
 
     private static final Set<String> ALLOWED_COMMANDS = Set.of(
@@ -20,7 +21,8 @@ public class ArthasCommandGuard {
             "thread",
             "thread -b",
             "jvm",
-            "memory"
+            "memory",
+            "version"
     );
 
     private static final Set<String> FORBIDDEN_COMMAND_PREFIXES = Set.of(

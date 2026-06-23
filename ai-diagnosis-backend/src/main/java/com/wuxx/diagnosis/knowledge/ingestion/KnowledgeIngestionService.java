@@ -9,12 +9,14 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
 import com.wuxx.diagnosis.knowledge.config.KnowledgeBaseProperties;
 import com.wuxx.diagnosis.knowledge.domain.KbChunk;
 import com.wuxx.diagnosis.knowledge.domain.KbDocument;
+import com.wuxx.diagnosis.knowledge.domain.KnowledgeReviewRequest;
 import com.wuxx.diagnosis.knowledge.domain.KnowledgeTextRequest;
 import com.wuxx.diagnosis.knowledge.mapper.KbChunkMapper;
 import com.wuxx.diagnosis.knowledge.mapper.KbDocumentMapper;
@@ -103,6 +105,28 @@ public class KnowledgeIngestionService {
     }
 
     /**
+     * 历史报告只创建待审核文档，不生成分片和向量。
+     */
+    @Transactional
+    public KbDocument createPendingReview(KnowledgeTextRequest request, long fileSize) {
+        requireEnabled();
+        String masked = SensitiveDataMasker.mask(request.getContent());
+        String contentHash = sha256(masked);
+        KbDocument existing = documentMapper.findByContentHash(contentHash);
+        if (existing != null) {
+            return existing;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        KbDocument document = newDocument(request, "HISTORY_REPORT", fileSize, contentHash, now);
+        document.setRawContent(masked);
+        document.setQualityStatus("PENDING_REVIEW");
+        document.setStatus("PENDING");
+        documentMapper.insert(document);
+        return document;
+    }
+
+    /**
      * 入库核心方法，供手工文本/文件上传与历史报告沉淀复用。
      *
      * @param sourceType MANUAL / HISTORY_REPORT
@@ -118,28 +142,80 @@ public class KnowledgeIngestionService {
         }
 
         LocalDateTime now = LocalDateTime.now();
-        KbDocument document = new KbDocument();
-        document.setDocNo("KB-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase());
+        KbDocument document = newDocument(request, sourceType, fileSize, contentHash, now);
+        document.setQualityStatus("APPROVED");
+        document.setStatus("INDEXING");
+        documentMapper.insert(document);
+        return indexChunks(document, masked, 1);
+    }
+
+    public KbDocument review(String docNo, KnowledgeReviewRequest request) {
+        requireEnabled();
+        KbDocument document = requireDocument(docNo);
+        requirePendingHistoryReview(document);
+        String action = request.getAction().trim().toUpperCase(Locale.ROOT);
+        if ("REJECT".equals(action)) {
+            return reject(document, request);
+        }
+        if (!"APPROVE".equals(action)) {
+            throw new IllegalArgumentException("审核动作仅支持 APPROVE 或 REJECT");
+        }
+        return approve(document, request);
+    }
+
+    private KbDocument approve(KbDocument document, KnowledgeReviewRequest request) {
+        if (!StringUtils.hasText(request.getTitle()) || !StringUtils.hasText(request.getContent())) {
+            throw new IllegalArgumentException("批准时标题和正文不能为空");
+        }
+        String masked = SensitiveDataMasker.mask(request.getContent());
+        String contentHash = sha256(masked);
+        KbDocument duplicate = documentMapper.findByContentHash(contentHash);
+        if (duplicate != null && !duplicate.getId().equals(document.getId())) {
+            throw new IllegalArgumentException("相同内容的知识文档已存在，docNo=" + duplicate.getDocNo());
+        }
+
+        LocalDateTime reviewedAt = LocalDateTime.now();
         document.setTitle(request.getTitle().trim());
-        document.setSourceType(sourceType);
-        document.setCategory(defaultValue(request.getCategory(), "SOP"));
+        document.setCategory(defaultValue(request.getCategory(), "CASE"));
         document.setDiagnoseType(normalizeScope(request.getDiagnoseType()));
         document.setAppId(normalizeScope(request.getAppId()));
         document.setEnv(normalizeScope(request.getEnv()));
-        document.setSourceRef(request.getSourceRef());
         document.setContentHash(contentHash);
-        document.setVersion(1);
+        document.setReviewedContent(masked);
+        document.setReviewComment(trimToNull(request.getComment()));
+        document.setReviewedBy(request.getReviewedBy().trim());
+        document.setReviewedAt(reviewedAt);
+        if (documentMapper.approvePendingReview(document) != 1) {
+            throw new IllegalStateException("该历史报告已被审核，请刷新后重试");
+        }
+
         document.setQualityStatus("APPROVED");
         document.setStatus("INDEXING");
-        document.setChunkCount(0);
-        document.setFileSize(fileSize);
-        document.setEmbeddingModel(properties.getEmbeddingModel());
-        document.setEmbeddingDimension(properties.getEmbeddingDimension());
-        document.setUploadedBy(request.getUploadedBy());
-        document.setCreatedAt(now);
-        document.setUpdatedAt(now);
-        documentMapper.insert(document);
-        return indexChunks(document, masked, 1);
+        document.setErrorMessage(null);
+        document.setUpdatedAt(reviewedAt);
+        try {
+            return indexChunks(document, masked, document.getVersion() == null ? 1 : document.getVersion());
+        } catch (IllegalStateException exception) {
+            log.warn("Approved knowledge indexing failed, docNo={}, message={}",
+                    document.getDocNo(), exception.getMessage());
+            return document;
+        }
+    }
+
+    private KbDocument reject(KbDocument document, KnowledgeReviewRequest request) {
+        if (!StringUtils.hasText(request.getComment())) {
+            throw new IllegalArgumentException("驳回时必须填写原因");
+        }
+        LocalDateTime reviewedAt = LocalDateTime.now();
+        document.setReviewComment(request.getComment().trim());
+        document.setReviewedBy(request.getReviewedBy().trim());
+        document.setReviewedAt(reviewedAt);
+        if (documentMapper.rejectPendingReview(document) != 1) {
+            throw new IllegalStateException("该历史报告已被审核，请刷新后重试");
+        }
+        document.setQualityStatus("REJECTED");
+        document.setUpdatedAt(reviewedAt);
+        return document;
     }
 
     /**
@@ -153,14 +229,20 @@ public class KnowledgeIngestionService {
     public KbDocument reindex(String docNo) {
         requireEnabled();
         KbDocument document = requireDocument(docNo);
+        if (!"APPROVED".equals(document.getQualityStatus())) {
+            throw new IllegalStateException("只有已批准的知识文档才能重建索引");
+        }
         List<KbChunk> oldChunks = chunkMapper.findByDocId(document.getId());
         List<String> oldVectorIds = oldChunks.stream().map(KbChunk::getVectorId).toList();
 
-        String prefix = "# " + document.getTitle().trim() + "\n\n";
-        String raw = oldChunks.stream()
-                .map(KbChunk::getContent)
-                .map(content -> content.startsWith(prefix) ? content.substring(prefix.length()) : content)
-                .collect(java.util.stream.Collectors.joining("\n"));
+        String raw = document.getReviewedContent();
+        if (!StringUtils.hasText(raw)) {
+            String prefix = "# " + document.getTitle().trim() + "\n\n";
+            raw = oldChunks.stream()
+                    .map(KbChunk::getContent)
+                    .map(content -> content.startsWith(prefix) ? content.substring(prefix.length()) : content)
+                    .collect(java.util.stream.Collectors.joining("\n"));
+        }
 
         if (!oldVectorIds.isEmpty()) {
             try {
@@ -241,8 +323,14 @@ public class KnowledgeIngestionService {
                             document.getDocNo(), cleanupException.getMessage());
                 }
             }
+            chunkMapper.deleteByDocId(document.getId());
+            LocalDateTime failedAt = LocalDateTime.now();
             documentMapper.updateIndexState(document.getId(), "FAILED", 0,
-                    truncate(exception.getMessage(), 1000), null, LocalDateTime.now());
+                    truncate(exception.getMessage(), 1000), null, failedAt);
+            document.setStatus("FAILED");
+            document.setChunkCount(0);
+            document.setErrorMessage(truncate(exception.getMessage(), 1000));
+            document.setUpdatedAt(failedAt);
             throw new IllegalStateException("知识索引失败：" + exception.getMessage(), exception);
         }
     }
@@ -266,14 +354,71 @@ public class KnowledgeIngestionService {
         return document;
     }
 
+    public KbDocument reviewDetail(String docNo) {
+        KbDocument document = requireDocument(docNo);
+        if (!"HISTORY_REPORT".equals(document.getSourceType())) {
+            throw new IllegalArgumentException("仅历史诊断报告提供审核详情");
+        }
+        if (!StringUtils.hasText(document.getRawContent())) {
+            String restored = restoreContent(document, chunkMapper.findByDocId(document.getId()));
+            document.setRawContent(restored);
+            if (!StringUtils.hasText(document.getReviewedContent())
+                    && "APPROVED".equals(document.getQualityStatus())) {
+                document.setReviewedContent(restored);
+            }
+        }
+        return document;
+    }
+
     public List<KbChunk> chunks(String docNo) {
         return chunkMapper.findByDocId(requireDocument(docNo).getId());
     }
 
-    public List<KbDocument> list(String sourceType, String status, int page, int size) {
+    public List<KbDocument> list(String sourceType, String status, String qualityStatus, int page, int size) {
         int safeSize = Math.max(1, Math.min(size, 100));
         int offset = Math.max(0, page) * safeSize;
-        return documentMapper.list(sourceType, status, offset, safeSize);
+        return documentMapper.list(sourceType, status, qualityStatus, offset, safeSize);
+    }
+
+    public int pendingReviewCount() {
+        return documentMapper.countPendingReviews();
+    }
+
+    private KbDocument newDocument(KnowledgeTextRequest request,
+                                   String sourceType,
+                                   long fileSize,
+                                   String contentHash,
+                                   LocalDateTime now) {
+        KbDocument document = new KbDocument();
+        document.setDocNo("KB-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase());
+        document.setTitle(request.getTitle().trim());
+        document.setSourceType(sourceType);
+        document.setCategory(defaultValue(request.getCategory(), "SOP"));
+        document.setDiagnoseType(normalizeScope(request.getDiagnoseType()));
+        document.setAppId(normalizeScope(request.getAppId()));
+        document.setEnv(normalizeScope(request.getEnv()));
+        document.setSourceRef(request.getSourceRef());
+        document.setContentHash(contentHash);
+        document.setVersion(1);
+        document.setChunkCount(0);
+        document.setFileSize(fileSize);
+        document.setEmbeddingModel(properties.getEmbeddingModel());
+        document.setEmbeddingDimension(properties.getEmbeddingDimension());
+        document.setUploadedBy(request.getUploadedBy());
+        document.setCreatedAt(now);
+        document.setUpdatedAt(now);
+        return document;
+    }
+
+    private void requirePendingHistoryReview(KbDocument document) {
+        if (!"HISTORY_REPORT".equals(document.getSourceType())) {
+            throw new IllegalArgumentException("仅历史诊断报告支持人工审核");
+        }
+        if (!"PENDING_REVIEW".equals(document.getQualityStatus())
+                || !"PENDING".equals(document.getStatus())) {
+            throw new IllegalStateException("该历史报告已被审核，当前状态="
+                    + document.getQualityStatus() + "/" + document.getStatus());
+        }
     }
 
     private void persistVectorStore() {
@@ -316,6 +461,18 @@ public class KnowledgeIngestionService {
 
     private String defaultValue(String value, String fallback) {
         return StringUtils.hasText(value) ? value.trim() : fallback;
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String restoreContent(KbDocument document, List<KbChunk> chunks) {
+        String prefix = "# " + document.getTitle().trim() + "\n\n";
+        return chunks.stream()
+                .map(KbChunk::getContent)
+                .map(content -> content.startsWith(prefix) ? content.substring(prefix.length()) : content)
+                .collect(java.util.stream.Collectors.joining("\n"));
     }
 
     private int estimateTokens(String text) {

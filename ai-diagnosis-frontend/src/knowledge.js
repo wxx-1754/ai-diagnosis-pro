@@ -1,9 +1,11 @@
 // 知识库管理页：管理员令牌、文本/文件上传、检索预览、文档列表（删除/重建索引/查看分片）。
 // 视觉与主诊断页同源：深色 token、单一 blue 强调色、8px 形状锁。
 import { railHtml } from './rail.js';
+import { isPendingReview, validateReviewInput } from './knowledge-review.js';
 import './knowledge.css';
 
 const TOKEN_KEY = 'ai-diagnosis.kbAdminToken';
+const REVIEWER_KEY = 'ai-diagnosis.kbReviewer';
 
 const SOURCE_TYPE_LABELS = {
   MANUAL: '手工知识',
@@ -17,6 +19,12 @@ const STATUS_META = {
   PENDING: { label: '待处理', tone: 'neutral' },
   FAILED: { label: '失败', tone: 'red' },
   DELETED: { label: '已删除', tone: 'neutral' }
+};
+
+const QUALITY_META = {
+  PENDING_REVIEW: { label: '待审核', tone: 'amber' },
+  APPROVED: { label: '已批准', tone: 'green' },
+  REJECTED: { label: '已驳回', tone: 'red' }
 };
 
 const DIAGNOSE_TYPES = [
@@ -50,19 +58,23 @@ export function mountKnowledge(container, { apiBase, query = '' }) {
   const local = {
     apiBase,
     token: localStorage.getItem(TOKEN_KEY) || '',
+    reviewer: localStorage.getItem(REVIEWER_KEY) || '',
     filters: {
       sourceType: params.sourceType || '',
-      status: params.status || ''
+      status: params.status || '',
+      qualityStatus: params.qualityStatus || ''
     },
     page: 0,
     list: [],
     loadingList: false,
     listError: '',
     toastTimer: null,
-    instanceOptions: []
+    instanceOptions: [],
+    pendingReviewCount: 0
   };
   container.innerHTML = knowledgeShell(local);
   bindKnowledge(container, local);
+  syncFilters(local);
   loadInstanceOptions(local);
   if (local.token) {
     loadList(local);
@@ -235,7 +247,13 @@ function listPanel() {
   return `
     <section class="kb-panel reveal" aria-label="文档列表">
       <div class="kb-panel-head">
-        <p class="panel-label">文档列表</p>
+        <div class="kb-list-title">
+          <p class="panel-label">文档列表</p>
+          <button type="button" class="kb-review-count" data-show-pending hidden>
+            <i class="ph ph-seal-question" aria-hidden="true"></i>
+            <span data-pending-count>0 条待审核</span>
+          </button>
+        </div>
         <div class="kb-filters">
           <select data-filter="sourceType">
             <option value="">全部来源</option>
@@ -244,6 +262,10 @@ function listPanel() {
           <select data-filter="status">
             <option value="">全部状态</option>
             ${Object.entries(STATUS_META).map(([value, meta]) => `<option value="${value}">${meta.label}</option>`).join('')}
+          </select>
+          <select data-filter="qualityStatus">
+            <option value="">全部质量状态</option>
+            ${Object.entries(QUALITY_META).map(([value, meta]) => `<option value="${value}">${meta.label}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -284,6 +306,7 @@ function renderDocList(local) {
 
 function docCardHtml(doc) {
   const status = STATUS_META[doc.status] || { label: doc.status, tone: 'neutral' };
+  const quality = QUALITY_META[doc.qualityStatus] || { label: doc.qualityStatus || '未设置', tone: 'neutral' };
   const scope = (value) => (value && value !== '__GLOBAL__' ? value : '全局');
   const meta = [
     ['来源', SOURCE_TYPE_LABELS[doc.sourceType] || doc.sourceType || '—', false],
@@ -293,6 +316,9 @@ function docCardHtml(doc) {
     ['应用', scope(doc.appId), !doc.appId || doc.appId === '__GLOBAL__'],
     ['更新', formatDateTime(doc.updatedAt), false]
   ];
+  const isHistory = doc.sourceType === 'HISTORY_REPORT';
+  const isPending = doc.qualityStatus === 'PENDING_REVIEW';
+  const isRejected = doc.qualityStatus === 'REJECTED';
   return `
     <article class="kb-doc" data-doc-no="${escapeHtml(doc.docNo)}">
       <div class="kb-doc-head">
@@ -300,7 +326,10 @@ function docCardHtml(doc) {
           <strong>${escapeHtml(doc.title)}</strong>
           <small>${escapeHtml(doc.docNo)}</small>
         </div>
-        <span class="kb-status" data-tone="${status.tone}">${status.label}</span>
+        <div class="kb-status-stack">
+          <span class="kb-status" data-tone="${quality.tone}">${quality.label}</span>
+          <span class="kb-status" data-tone="${status.tone}">${status.label}</span>
+        </div>
       </div>
       <div class="kb-doc-meta">
         ${meta.map(([label, value, muted]) => `
@@ -311,17 +340,31 @@ function docCardHtml(doc) {
         `).join('')}
       </div>
       ${doc.errorMessage ? `<p class="kb-doc-error">${escapeHtml(doc.errorMessage)}</p>` : ''}
+      ${doc.reviewComment ? `<p class="kb-review-note"><strong>审核意见</strong>${escapeHtml(doc.reviewComment)}</p>` : ''}
       <div class="kb-doc-actions">
+        ${isHistory ? `
+          <button type="button" class="${isPending ? 'primary-button' : 'ghost-button'}"
+                  data-action="review" data-review-pending="${isPending}" aria-expanded="false">
+            <i class="ph ${isPending ? 'ph-seal-check' : 'ph-file-magnifying-glass'}" aria-hidden="true"></i>
+            ${isPending ? '审核报告' : '查看审核'}
+          </button>
+          ${doc.sourceRef ? `
+            <a class="ghost-button kb-task-link" href="#/overview/${encodeURIComponent(doc.sourceRef)}">
+              <i class="ph ph-arrow-square-out" aria-hidden="true"></i>原诊断任务
+            </a>
+          ` : ''}
+        ` : ''}
         <button type="button" class="ghost-button" data-action="chunks">
           <i class="ph ph-list-dashes" aria-hidden="true"></i>查看分片
         </button>
-        <button type="button" class="ghost-button" data-action="reindex">
+        ${!isRejected && doc.qualityStatus === 'APPROVED' ? `<button type="button" class="ghost-button" data-action="reindex">
           <i class="ph ph-arrows-clockwise" aria-hidden="true"></i>重建索引
-        </button>
+        </button>` : ''}
         <button type="button" class="ghost-button kb-danger" data-action="delete">
           <i class="ph ph-trash" aria-hidden="true"></i>删除
         </button>
       </div>
+      <div class="kb-review-view" data-review-view hidden></div>
       <div class="kb-chunk-view" data-chunk-view hidden></div>
     </article>
   `;
@@ -465,6 +508,13 @@ function bindKnowledge(container, local) {
   });
 
   container.querySelector('[data-refresh]').addEventListener('click', () => loadList(local));
+  container.querySelector('[data-show-pending]').addEventListener('click', () => {
+    local.filters.sourceType = 'HISTORY_REPORT';
+    local.filters.qualityStatus = 'PENDING_REVIEW';
+    local.page = 0;
+    syncFilters(local);
+    loadList(local);
+  });
 
   // 分类下拉：选「自定义...」切换为文本输入。
   container.querySelectorAll('[data-text="categorySelect"], [data-file="categorySelect"]').forEach((select) => {
@@ -490,6 +540,7 @@ function bindKnowledge(container, local) {
     const card = button.closest('[data-doc-no]');
     const docNo = card.getAttribute('data-doc-no');
     const action = button.getAttribute('data-action');
+    if (action === 'review') showReview(local, docNo, card, button);
     if (action === 'chunks') showChunks(local, docNo, card, button);
     if (action === 'reindex') reindexDoc(local, docNo);
     if (action === 'delete') deleteDoc(local, docNo);
@@ -603,18 +654,236 @@ async function loadList(local) {
   const params = new URLSearchParams();
   if (local.filters.sourceType) params.set('sourceType', local.filters.sourceType);
   if (local.filters.status) params.set('status', local.filters.status);
+  if (local.filters.qualityStatus) params.set('qualityStatus', local.filters.qualityStatus);
   params.set('page', local.page);
   params.set('size', PAGE_SIZE);
   try {
-    local.list = await requestJson(local, `/api/admin/kb/documents?${params.toString()}`);
+    const [list, reviewCount] = await Promise.all([
+      requestJson(local, `/api/admin/kb/documents?${params.toString()}`),
+      requestJson(local, '/api/admin/kb/documents/review-count').catch(() => ({ pending: 0 }))
+    ]);
+    local.list = list;
+    local.pendingReviewCount = Number(reviewCount.pending) || 0;
     local.listError = '';
   } catch (error) {
     local.list = [];
     local.listError = error.message;
   }
   local.loadingList = false;
+  renderPendingCount(local);
   renderDocList(local);
 }
+
+function syncFilters(local) {
+  local.root.querySelectorAll('[data-filter]').forEach((select) => {
+    select.value = local.filters[select.dataset.filter] || '';
+  });
+}
+
+function renderPendingCount(local) {
+  const button = local.root.querySelector('[data-show-pending]');
+  const label = local.root.querySelector('[data-pending-count]');
+  if (!button || !label) return;
+  button.hidden = local.pendingReviewCount <= 0;
+  label.textContent = `${local.pendingReviewCount} 条待审核`;
+}
+
+async function showReview(local, docNo, card, button) {
+  const view = card.querySelector('[data-review-view]');
+  if (!view) return;
+  if (!view.hidden) {
+    collapseReview(view, button);
+    return;
+  }
+  view.hidden = false;
+  button?.setAttribute('aria-expanded', 'true');
+  if (button) {
+    button.innerHTML = '<i class="ph ph-caret-up" aria-hidden="true"></i>收起审核';
+  }
+  view.dataset.loaded = '0';
+  view.innerHTML = stateHtml('ph-spinner-gap', '加载审核材料...', '');
+  try {
+    const doc = await requestJson(local, `/api/admin/kb/documents/${encodeURIComponent(docNo)}/review`);
+    view.innerHTML = reviewPanelHtml(doc, local.reviewer);
+    view.dataset.loaded = '1';
+    bindReviewPanel(local, docNo, view);
+  } catch (error) {
+    view.innerHTML = stateHtml('ph-warning-circle', error.message, 'is-error');
+  }
+}
+
+function reviewPanelHtml(doc, reviewer) {
+  const editable = isPendingReview(doc.qualityStatus);
+  const finalContent = doc.reviewedContent || doc.rawContent || '';
+  const sourceRef = doc.sourceRef || doc.docNo;
+  const readonlyAttr = editable ? '' : 'readonly';
+  return `
+    <div class="kb-review">
+      <header class="kb-review-bar">
+        <div class="kb-review-bar-main">
+          <span class="panel-label">${editable ? '人工审核工作台' : '审核记录'}</span>
+          <strong class="kb-review-source-ref">${escapeHtml(sourceRef)}</strong>
+        </div>
+        <div class="kb-review-bar-meta">
+          <i class="ph ph-clock" aria-hidden="true"></i>
+          <span>${escapeHtml(formatDateTime(doc.createdAt))}</span>
+          <button type="button" class="ghost-button" data-review-collapse>
+            <i class="ph ph-caret-up" aria-hidden="true"></i>收起
+          </button>
+        </div>
+      </header>
+
+      <form class="kb-review-form" data-review-form>
+        <div class="kb-review-body">
+          <section class="kb-review-pane">
+            <div class="kb-review-pane-head">
+              <span class="kb-review-pane-title">原始脱敏报告</span>
+              <span class="kb-review-pane-tag">只读</span>
+            </div>
+            <pre class="kb-review-raw">${escapeHtml(doc.rawContent || '')}</pre>
+          </section>
+
+          <section class="kb-review-pane">
+            <div class="kb-review-pane-head">
+              <span class="kb-review-pane-title">${editable ? '修订知识' : '审核结果'}</span>
+              <span class="kb-review-pane-tag">${editable ? '可编辑' : '只读'}</span>
+            </div>
+            <div class="kb-review-fields">
+              <label class="kb-field kb-field-wide">
+                <span>知识标题</span>
+                <input data-review="title" value="${escapeHtml(doc.title || '')}" ${readonlyAttr} />
+              </label>
+              <label class="kb-field kb-field-wide">
+                <span>最终知识正文</span>
+                <textarea data-review="content" rows="9" ${readonlyAttr}>${escapeHtml(finalContent)}</textarea>
+              </label>
+              <div class="kb-field-row kb-review-meta-row">
+                <label class="kb-field">
+                  <span>分类</span>
+                  <input data-review="category" value="${escapeHtml(doc.category || 'CASE')}" ${readonlyAttr} />
+                </label>
+                <label class="kb-field">
+                  <span>诊断类型</span>
+                  <select data-review="diagnoseType" ${editable ? '' : 'disabled'}>
+                    ${DIAGNOSE_TYPES.map((type) => `<option value="${type.value}" ${normalizeScope(doc.diagnoseType) === type.value ? 'selected' : ''}>${type.label}</option>`).join('')}
+                  </select>
+                </label>
+                <label class="kb-field">
+                  <span>应用</span>
+                  <input data-review="appId" value="${escapeHtml(normalizeScope(doc.appId))}" ${readonlyAttr} />
+                </label>
+                <label class="kb-field">
+                  <span>环境</span>
+                  <input data-review="env" value="${escapeHtml(normalizeScope(doc.env))}" ${readonlyAttr} />
+                </label>
+              </div>
+              <label class="kb-field kb-field-wide">
+                <span>${editable ? '审核说明 / 驳回原因' : '审核意见'}</span>
+                <textarea data-review="comment" rows="3" ${readonlyAttr}>${escapeHtml(doc.reviewComment || '')}</textarea>
+              </label>
+              <label class="kb-field kb-field-wide">
+                <span>审核人</span>
+                <input data-review="reviewedBy" value="${escapeHtml(doc.reviewedBy || reviewer || '')}" ${readonlyAttr} placeholder="请输入审核人" />
+              </label>
+            </div>
+          </section>
+        </div>
+
+        ${editable ? `
+          <footer class="kb-review-footer">
+            <button type="button" class="primary-button" data-review-action="APPROVE">
+              <i class="ph ph-check-circle" aria-hidden="true"></i>修订后批准
+            </button>
+            <button type="button" class="secondary-button kb-reject-button" data-review-action="REJECT">
+              <i class="ph ph-x-circle" aria-hidden="true"></i>驳回
+            </button>
+            <span class="kb-hint">批准后才会分片并生成向量；驳回记录永久保留但不可检索。</span>
+          </footer>
+        ` : `
+          <footer class="kb-review-footer">
+            <span class="kb-review-audit">
+              <i class="ph ph-seal-check" aria-hidden="true"></i>
+              ${escapeHtml(doc.reviewedBy || '未知审核人')} · ${escapeHtml(formatDateTime(doc.reviewedAt))}
+            </span>
+          </footer>
+        `}
+      </form>
+    </div>
+  `;
+}
+
+function bindReviewPanel(local, docNo, view) {
+  const form = view.querySelector('[data-review-form]');
+  const card = view.closest('[data-doc-no]');
+  const trigger = card?.querySelector('[data-action="review"]');
+  view.querySelector('[data-review-collapse]')?.addEventListener('click', () => {
+    collapseReview(view, trigger);
+  });
+  if (!form) return;
+  form.addEventListener('submit', (event) => event.preventDefault());
+  form.querySelectorAll('[data-review-action]').forEach((actionButton) => {
+    actionButton.addEventListener('click', () => submitReview(
+      local,
+      docNo,
+      form,
+      actionButton.dataset.reviewAction
+    ));
+  });
+}
+
+async function submitReview(local, docNo, form, action) {
+  const body = {
+    action,
+    title: form.querySelector('[data-review="title"]').value.trim(),
+    content: form.querySelector('[data-review="content"]').value,
+    category: form.querySelector('[data-review="category"]').value.trim(),
+    diagnoseType: form.querySelector('[data-review="diagnoseType"]').value,
+    appId: form.querySelector('[data-review="appId"]').value.trim(),
+    env: form.querySelector('[data-review="env"]').value.trim(),
+    comment: form.querySelector('[data-review="comment"]').value.trim(),
+    reviewedBy: form.querySelector('[data-review="reviewedBy"]').value.trim()
+  };
+  const validationError = validateReviewInput(body);
+  if (validationError) {
+    showToast(local, validationError, true);
+    return;
+  }
+  if (action === 'REJECT' && !confirm('确认驳回该历史报告？驳回后不可重新提交审核。')) return;
+  local.reviewer = body.reviewedBy;
+  localStorage.setItem(REVIEWER_KEY, body.reviewedBy);
+  form.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+  try {
+    const reviewed = await requestJson(local, `/api/admin/kb/documents/${encodeURIComponent(docNo)}/review`, {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    const message = action === 'REJECT'
+      ? '历史报告已驳回'
+      : reviewed.status === 'FAILED'
+        ? '审核已通过，但索引失败；请查看错误并重建索引'
+        : '审核通过，知识已进入索引';
+    showToast(local, message, reviewed.status === 'FAILED');
+    loadList(local);
+  } catch (error) {
+    showToast(local, error.message, true);
+    form.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+  }
+}
+
+function collapseReview(view, trigger) {
+  view.hidden = true;
+  trigger?.setAttribute('aria-expanded', 'false');
+  if (trigger) {
+    trigger.innerHTML = trigger.dataset.reviewPending === 'true'
+      ? '<i class="ph ph-seal-check" aria-hidden="true"></i>审核报告'
+      : '<i class="ph ph-file-magnifying-glass" aria-hidden="true"></i>查看审核';
+  }
+}
+
+function normalizeScope(value) {
+  return value && value !== '__GLOBAL__' ? value : '';
+}
+
 
 // 分片就地展开/收起：在文档卡片内部展示，不污染检索结果区。
 // 已展开则收起；未加载则加载并展开。

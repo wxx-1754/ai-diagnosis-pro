@@ -30,6 +30,17 @@
   flex-wrap: wrap;
 }
 
+/* 按钮内图标 + 文案垂直居中：基类仅设 min-height/padding，
+   未设 flex 居中，导致图标贴基线、不在框中居中。全页统一锁定。 */
+.knowledge-workspace .primary-button,
+.knowledge-workspace .secondary-button,
+.knowledge-workspace .ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 .token-field {
   display: grid;
   gap: 5px;
@@ -97,6 +108,35 @@
 
 .kb-panel-head .panel-label {
   margin: 0;
+}
+
+.kb-list-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.kb-review-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgb(255 159 67 / 0.35);
+  border-radius: 999px;
+  background: rgb(255 159 67 / 0.1);
+  color: #ffc187;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.kb-review-count:hover {
+  border-color: rgb(255 159 67 / 0.65);
+  background: rgb(255 159 67 / 0.16);
+}
+
+.kb-review-count[hidden] {
+  display: none;
 }
 
 /* ===== Tab 切换（文本 / 文件） ===== */
@@ -339,6 +379,14 @@
   white-space: nowrap;
 }
 
+.kb-status-stack {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .kb-status[data-tone='green'] { background: rgb(102 216 120 / 0.16); color: #8be89a; }
 .kb-status[data-tone='amber'] { background: rgb(255 159 67 / 0.16); color: #ffc187; }
 .kb-status[data-tone='red'] { background: rgb(255 107 107 / 0.16); color: #ff9b9b; }
@@ -390,6 +438,22 @@
   line-height: 1.5;
 }
 
+.kb-review-note {
+  margin: 0;
+  padding: 9px 11px;
+  border-left: 2px solid rgb(83 145 255 / 0.65);
+  background: rgb(52 125 255 / 0.07);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.kb-review-note strong {
+  margin-right: 8px;
+  color: #9dbcf2;
+  font-weight: 600;
+}
+
 /* 卡片操作区 */
 .kb-doc-actions {
   display: flex;
@@ -401,6 +465,15 @@
   min-height: 30px;
   padding: 0 11px;
   font-size: 12px;
+}
+
+.kb-doc-actions .primary-button,
+.kb-doc-actions .secondary-button,
+.kb-task-link {
+  min-height: 30px;
+  padding: 0 11px;
+  font-size: 12px;
+  text-decoration: none;
 }
 
 .kb-doc-actions .kb-danger {
@@ -417,6 +490,212 @@
   gap: 8px;
   padding-top: 4px;
   border-top: 1px dashed var(--line);
+}
+
+.kb-review-view {
+  display: grid;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+
+.kb-review-view[hidden] {
+  display: none;
+}
+
+/* 审核工作台容器：独立面板，与文档卡片视觉分层。 */
+.kb-review {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgb(52 125 255 / 0.04), transparent 40%),
+    rgb(4 9 14 / 0.72);
+  padding: 16px;
+}
+
+.kb-review-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.kb-review-bar-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.kb-review-bar-main .panel-label {
+  margin: 0;
+}
+
+.kb-review-source-ref {
+  color: var(--ink);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.kb-review-bar-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.kb-review-bar-meta .ghost-button {
+  min-height: 30px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.kb-review-form {
+  display: grid;
+  gap: 14px;
+}
+
+/* 左右双栏：原始报告只读 / 修订编辑器，等高对齐。 */
+.kb-review-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.kb-review-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;          /* 允许被 grid 收缩到内容以下，行高由右侧编辑器栏决定 */
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(6 12 18 / 0.5);
+  overflow: hidden;
+}
+
+.kb-review-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgb(255 255 255 / 0.022);
+}
+
+.kb-review-pane-title {
+  color: var(--muted);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.kb-review-pane-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(147 164 181 / 0.14);
+  color: #b6c2cf;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* 原始脱敏报告：等宽 + 行栅格背景，高度严格跟随右侧编辑器栏，超出内部滚动。 */
+.kb-review-raw {
+  flex: 1 1 0;
+  min-height: 0;          /* 关键：允许在 flex 容器内收缩并触发滚动，不再撑高面板 */
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  background:
+    linear-gradient(90deg, rgb(52 125 255 / 0.03) 1px, transparent 1px),
+    rgb(2 7 12 / 0.5);
+  background-size: 26px 100%;
+  color: #aebdca;
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kb-review-fields {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.kb-review-fields textarea[data-review='content'] {
+  min-height: 220px;
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.58;
+}
+
+/* 元数据 2×2 网格，覆盖 field-row 的 auto-fit，避免半栏内挤压成单列。 */
+.kb-review-meta-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.kb-review-fields input:not([readonly]),
+.kb-review-fields textarea:not([readonly]),
+.kb-review-fields select:not(:disabled) {
+  border-color: rgb(83 145 255 / 0.42);
+  background: rgb(8 18 29 / 0.94);
+  color: #f2f7ff;
+}
+
+.kb-review-fields select:not(:disabled) {
+  cursor: pointer;
+}
+
+.kb-review-fields input[readonly],
+.kb-review-fields textarea[readonly],
+.kb-review-fields select:disabled {
+  color: var(--muted);
+  opacity: 0.78;
+}
+
+.kb-review-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(6 12 18 / 0.45);
+}
+
+.kb-review-footer .kb-hint {
+  margin-left: auto;
+  text-align: right;
+}
+
+.kb-reject-button {
+  color: #ffaaaa;
+  border-color: rgb(255 107 107 / 0.35);
+}
+
+.kb-reject-button:hover {
+  border-color: rgb(255 107 107 / 0.65);
+  background: rgb(255 107 107 / 0.1);
+}
+
+.kb-review-audit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-family: "Cascadia Code", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.kb-review-audit i {
+  color: var(--green);
 }
 
 .kb-chunk-view[hidden] {
@@ -538,5 +817,16 @@
   }
   .kb-grid {
     grid-template-columns: 1fr;
+  }
+  .kb-review-body {
+    grid-template-columns: 1fr;
+  }
+  .kb-review-raw {
+    min-height: 200px;
+    max-height: 360px;
+  }
+  .kb-review-footer .kb-hint {
+    margin-left: 0;
+    text-align: left;
   }
 }

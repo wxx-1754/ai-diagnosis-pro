@@ -10,6 +10,7 @@ public class SqlDatasourceConfig {
     private Long id;
     private String datasourceCode;
     private String datasourceName;
+    private String appId;
     private String dbType;
     private String jdbcUrl;
     private String username;

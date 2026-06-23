@@ -20,6 +20,7 @@ class ArthasCommandGuardTest {
         assertThatCode(() -> guard.check("thread -b")).doesNotThrowAnyException();
         assertThatCode(() -> guard.check("jvm")).doesNotThrowAnyException();
         assertThatCode(() -> guard.check("memory")).doesNotThrowAnyException();
+        assertThatCode(() -> guard.check("version")).doesNotThrowAnyException();
         assertThatCode(() -> guard.check("trace com.demo.OrderService createOrder -n 3")).doesNotThrowAnyException();
     }
 

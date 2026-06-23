@@ -1,9 +1,11 @@
 package com.wuxx.diagnosis.knowledge.controller;
 
 import java.util.List;
+import java.util.Map;
 
 import com.wuxx.diagnosis.knowledge.domain.KbChunk;
 import com.wuxx.diagnosis.knowledge.domain.KbDocument;
+import com.wuxx.diagnosis.knowledge.domain.KnowledgeReviewRequest;
 import com.wuxx.diagnosis.knowledge.domain.KnowledgeTextRequest;
 import com.wuxx.diagnosis.knowledge.ingestion.KnowledgeIngestionService;
 import com.wuxx.diagnosis.knowledge.security.KbAdminAccessGuard;
@@ -57,10 +59,18 @@ public class KnowledgeDocumentController {
     public List<KbDocument> list(@RequestHeader(value = TOKEN_HEADER, required = false) String token,
                                  @RequestParam(required = false) String sourceType,
                                  @RequestParam(required = false) String status,
+                                 @RequestParam(required = false) String qualityStatus,
                                  @RequestParam(defaultValue = "0") int page,
                                  @RequestParam(defaultValue = "20") int size) {
         accessGuard.check(token);
-        return ingestionService.list(sourceType, status, page, size);
+        return ingestionService.list(sourceType, status, qualityStatus, page, size);
+    }
+
+    @GetMapping("/review-count")
+    public Map<String, Integer> reviewCount(
+            @RequestHeader(value = TOKEN_HEADER, required = false) String token) {
+        accessGuard.check(token);
+        return Map.of("pending", ingestionService.pendingReviewCount());
     }
 
     @GetMapping("/{docNo}")
@@ -75,6 +85,22 @@ public class KnowledgeDocumentController {
                                 @PathVariable String docNo) {
         accessGuard.check(token);
         return ingestionService.chunks(docNo);
+    }
+
+    @GetMapping("/{docNo}/review")
+    public KbDocument reviewDetail(
+            @RequestHeader(value = TOKEN_HEADER, required = false) String token,
+            @PathVariable String docNo) {
+        accessGuard.check(token);
+        return ingestionService.reviewDetail(docNo);
+    }
+
+    @PostMapping("/{docNo}/review")
+    public KbDocument review(@RequestHeader(value = TOKEN_HEADER, required = false) String token,
+                             @PathVariable String docNo,
+                             @Valid @RequestBody KnowledgeReviewRequest request) {
+        accessGuard.check(token);
+        return ingestionService.review(docNo, request);
     }
 
     @PostMapping("/{docNo}/reindex")

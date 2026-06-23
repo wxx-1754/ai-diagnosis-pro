@@ -68,6 +68,9 @@ diagnosis:
     unrestricted-ai-max-command-length: ${DIAGNOSIS_ARTHAS_UNRESTRICTED_AI_MAX_COMMAND_LENGTH:4000}
     unrestricted-ai-max-calls-per-task: ${DIAGNOSIS_ARTHAS_UNRESTRICTED_AI_MAX_CALLS_PER_TASK:12}
     unrestricted-ai-exec-timeout-ms: ${DIAGNOSIS_ARTHAS_UNRESTRICTED_AI_EXEC_TIMEOUT_MS:90000}
+    tunnel:
+      ws-url: ${DIAGNOSIS_ARTHAS_TUNNEL_WS_URL:ws://127.0.0.1:7777/ws}
+      web-url: ${DIAGNOSIS_ARTHAS_TUNNEL_WEB_URL:http://127.0.0.1:8080}
   sql:
     enabled: ${DIAGNOSIS_SQL_ENABLED:true}
     admin-enabled: ${DIAGNOSIS_SQL_ADMIN_ENABLED:true}
@@ -81,6 +84,13 @@ diagnosis:
     # SQL 诊断证据门禁阈值：trace 中 MyBatis/JDBC 节点耗时占比/绝对耗时达标才允许进入 SQL 诊断
     evidence-min-cost-percent: ${DIAGNOSIS_SQL_EVIDENCE_MIN_COST_PERCENT:30}
     evidence-min-cost-millis: ${DIAGNOSIS_SQL_EVIDENCE_MIN_COST_MILLIS:100}
+  app-instance:
+    # App Instance 管理写接口（CRUD/连通性测试）。默认关闭，开启后必须配置管理令牌。
+    admin-enabled: ${DIAGNOSIS_APP_INSTANCE_ADMIN_ENABLED:true}
+    admin-token: ${DIAGNOSIS_APP_INSTANCE_ADMIN_TOKEN:hQ7$nP@3xK!9vR%2mT&5wY*0bC_4sLq}
+    # 密码加密复用 DIAGNOSIS_SQL_ENCRYPTION_KEY，无需单独配置。
+    connect-timeout-ms: ${DIAGNOSIS_APP_INSTANCE_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${DIAGNOSIS_APP_INSTANCE_READ_TIMEOUT_MS:5000}
   kb:
     enabled: ${DIAGNOSIS_KB_ENABLED:true}
     admin-enabled: ${DIAGNOSIS_KB_ADMIN_ENABLED:true}

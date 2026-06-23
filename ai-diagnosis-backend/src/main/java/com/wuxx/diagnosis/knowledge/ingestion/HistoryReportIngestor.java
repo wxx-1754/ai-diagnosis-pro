@@ -15,20 +15,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 /**
- * 历史诊断报告自动沉淀为知识库条目。
+ * 历史诊断报告自动提交到知识库审核队列。
  *
- * <p>报告生成并落库后触发，将报告 Markdown 作为 source_type=HISTORY_REPORT 的知识入库，
- * 形成"平台记忆"——同类问题再次出现时可被检索复用。按 source_ref=taskNo 去重，
- * 同一任务不重复入库；报告重新生成时因内容变化会通过 content_hash 命中已存在则跳过，
- * 保证不重复消耗 embedding。
+ * <p>报告生成并落库后触发，保存脱敏原文并标记为 PENDING_REVIEW。
+ * 审核通过前不分片、不生成向量，也不会参与检索。按 source_ref=taskNo 去重，
+ * 同一任务不重复提交审核。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "diagnosis.kb", name = "enabled", havingValue = "true")
 public class HistoryReportIngestor {
-
-    private static final String SOURCE_TYPE = "HISTORY_REPORT";
 
     private final KnowledgeBaseProperties properties;
     private final KnowledgeIngestionService ingestionService;
@@ -37,7 +34,7 @@ public class HistoryReportIngestor {
     private final DiagnoseReportService diagnoseReportService;
 
     /**
-     * 沉淀单个任务的报告。失败仅记录日志，不影响主诊断链路。
+     * 提交单个任务的报告等待审核。失败仅记录日志，不影响主诊断链路。
      */
     public void ingest(String taskNo) {
         if (!properties.isAutoIngestHistory()) {
@@ -70,10 +67,10 @@ public class HistoryReportIngestor {
             request.setEnv(task.getEnv());
             request.setSourceRef(taskNo);
             request.setUploadedBy("system");
-            KbDocument document = ingestionService.ingest(request, SOURCE_TYPE,
+            KbDocument document = ingestionService.createPendingReview(request,
                     markdown.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
-            log.info("History report ingested, taskNo={}, docNo={}, chunkCount={}",
-                    taskNo, document.getDocNo(), document.getChunkCount());
+            log.info("History report submitted for review, taskNo={}, docNo={}, qualityStatus={}",
+                    taskNo, document.getDocNo(), document.getQualityStatus());
         } catch (Exception exception) {
             log.warn("History report ingest failed, taskNo={}, message={}",
                     taskNo, exception.getMessage());

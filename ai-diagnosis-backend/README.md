@@ -1,9 +1,9 @@
 # AI Diagnosis Backend
 
-第一阶段后端提供一个受控的 Arthas HTTP 执行网关：
+后端提供一个受控的 Arthas HTTP/Tunnel 执行网关：
 
 ```text
-appId + env + commandType -> 固定 Arthas 命令 -> Arthas HTTP API -> 审计记录
+appId + env + commandType -> 固定 Arthas 命令 -> HTTP 或 Tunnel -> 审计记录
 ```
 
 前端或后续 AI Agent 不能直接传 Arthas 原生命令，只能传 `commandType`。
@@ -63,7 +63,30 @@ diagnosis:
     read-timeout-ms: 10000
     max-output-length: 20000
     audit-output-excerpt-length: 4000
+    tunnel:
+      ws-url: ws://127.0.0.1:7777/ws
+      web-url: http://127.0.0.1:8080
 ```
+
+### 多服务接入 Arthas Tunnel
+
+每个需要诊断的 Spring Boot 服务必须使用唯一 `agentId` 注册到同一个 Tunnel Server：
+
+```properties
+arthas.tunnel-server=ws://tunnel-server:7777/ws
+arthas.agent-id=order-service-prod-01
+arthas.app-name=order-service
+```
+
+在实例管理页创建记录时选择 `TUNNEL`，填写相同的 `arthasAgentId`。TUNNEL 模式不需要
+填写目标服务 IP、8563 端口和 Arthas HTTP 认证信息。诊断命令会连接：
+
+```text
+ws://tunnel-server:7777/ws?method=connectArthas&id=<arthasAgentId>
+```
+
+HTTP 模式继续直连实例的 `8563/api`，两种模式由 `app_instance.access_mode` 显式选择，
+Tunnel 失败时不会自动回退到 HTTP。
 
 ## 启动
 

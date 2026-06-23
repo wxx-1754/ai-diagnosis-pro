@@ -9,6 +9,7 @@ public class SqlDatasourceOption {
 
     private String datasourceCode;
     private String datasourceName;
+    private String appId;
     private String dbType;
     private String env;
 }

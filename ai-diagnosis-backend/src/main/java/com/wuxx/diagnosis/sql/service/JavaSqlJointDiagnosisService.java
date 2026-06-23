@@ -118,7 +118,7 @@ public class JavaSqlJointDiagnosisService {
 
     public JavaSqlJointDiagnosisResponse start(JavaSqlJointDiagnosisRequest request) {
         DiagnoseTask task = validateTask(request.getTaskNo());
-        SqlDatasourceConfig datasource = datasourceService.getEnabled(request.getDatasourceCode().trim(), task.getEnv());
+        SqlDatasourceConfig datasource = datasourceService.getEnabled(request.getDatasourceCode().trim(), task.getAppId(), task.getEnv());
         String tableName = safetyChecker.checkTableName(request.getMainTableName());
         SqlDiagnosisRecord record;
         Object lock = taskLocks.computeIfAbsent(task.getTaskNo(), ignored -> new Object());
@@ -168,7 +168,7 @@ public class JavaSqlJointDiagnosisService {
             }
 
             DiagnoseTask task = validateTask(taskNo);
-            SqlDatasourceConfig datasource = datasourceService.getEnabled(record.getDatasourceCode(), task.getEnv());
+            SqlDatasourceConfig datasource = datasourceService.getEnabled(record.getDatasourceCode(), task.getAppId(), task.getEnv());
             send(taskNo, DiagnoseEventType.SQL_EXPLAIN_START, "正在执行 MySQL Explain",
                     Map.of("sqlRecordId", recordId, "datasourceCode", record.getDatasourceCode()));
 

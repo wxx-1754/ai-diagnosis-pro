@@ -18,12 +18,16 @@ public interface KbDocumentMapper {
     @Insert("""
             INSERT INTO kb_document (
                 doc_no, title, source_type, category, diagnose_type, app_id, env,
-                source_ref, content_hash, version, quality_status, status, chunk_count,
+                source_ref, content_hash, raw_content, reviewed_content,
+                review_comment, reviewed_by, reviewed_at,
+                version, quality_status, status, chunk_count,
                 file_size, embedding_model, embedding_dimension, uploaded_by,
                 created_at, updated_at
             ) VALUES (
                 #{docNo}, #{title}, #{sourceType}, #{category}, #{diagnoseType}, #{appId}, #{env},
-                #{sourceRef}, #{contentHash}, #{version}, #{qualityStatus}, #{status}, #{chunkCount},
+                #{sourceRef}, #{contentHash}, #{rawContent}, #{reviewedContent},
+                #{reviewComment}, #{reviewedBy}, #{reviewedAt},
+                #{version}, #{qualityStatus}, #{status}, #{chunkCount},
                 #{fileSize}, #{embeddingModel}, #{embeddingDimension}, #{uploadedBy},
                 #{createdAt}, #{updatedAt}
             )
@@ -69,7 +73,11 @@ public interface KbDocumentMapper {
 
     @Select("""
             <script>
-            SELECT *
+            SELECT id, doc_no, title, source_type, category, diagnose_type, app_id, env,
+                   source_ref, content_hash, version, quality_status, status, chunk_count,
+                   file_size, error_message, embedding_model, embedding_dimension,
+                   uploaded_by, reviewed_by, reviewed_at, review_comment,
+                   indexed_at, created_at, updated_at, deleted_at
             FROM kb_document
             WHERE deleted_at IS NULL
             <if test="sourceType != null and sourceType != ''">
@@ -78,14 +86,66 @@ public interface KbDocumentMapper {
             <if test="status != null and status != ''">
               AND status = #{status}
             </if>
+            <if test="qualityStatus != null and qualityStatus != ''">
+              AND quality_status = #{qualityStatus}
+            </if>
             ORDER BY id DESC
             LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
     List<KbDocument> list(@Param("sourceType") String sourceType,
                           @Param("status") String status,
+                          @Param("qualityStatus") String qualityStatus,
                           @Param("offset") int offset,
                           @Param("limit") int limit);
+
+    @Select("""
+            SELECT COUNT(*)
+            FROM kb_document
+            WHERE deleted_at IS NULL
+              AND source_type = 'HISTORY_REPORT'
+              AND quality_status = 'PENDING_REVIEW'
+            """)
+    int countPendingReviews();
+
+    @Update("""
+            UPDATE kb_document
+            SET title = #{title},
+                category = #{category},
+                diagnose_type = #{diagnoseType},
+                app_id = #{appId},
+                env = #{env},
+                content_hash = #{contentHash},
+                reviewed_content = #{reviewedContent},
+                review_comment = #{reviewComment},
+                reviewed_by = #{reviewedBy},
+                reviewed_at = #{reviewedAt},
+                quality_status = 'APPROVED',
+                status = 'INDEXING',
+                error_message = NULL,
+                updated_at = #{reviewedAt}
+            WHERE id = #{id}
+              AND source_type = 'HISTORY_REPORT'
+              AND quality_status = 'PENDING_REVIEW'
+              AND status = 'PENDING'
+              AND deleted_at IS NULL
+            """)
+    int approvePendingReview(KbDocument document);
+
+    @Update("""
+            UPDATE kb_document
+            SET review_comment = #{reviewComment},
+                reviewed_by = #{reviewedBy},
+                reviewed_at = #{reviewedAt},
+                quality_status = 'REJECTED',
+                updated_at = #{reviewedAt}
+            WHERE id = #{id}
+              AND source_type = 'HISTORY_REPORT'
+              AND quality_status = 'PENDING_REVIEW'
+              AND status = 'PENDING'
+              AND deleted_at IS NULL
+            """)
+    int rejectPendingReview(KbDocument document);
 
     @Update("""
             UPDATE kb_document

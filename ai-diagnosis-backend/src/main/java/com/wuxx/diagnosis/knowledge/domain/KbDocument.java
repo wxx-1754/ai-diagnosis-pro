@@ -15,6 +15,11 @@ public class KbDocument {
     private String env;
     private String sourceRef;
     private String contentHash;
+    private String rawContent;
+    private String reviewedContent;
+    private String reviewComment;
+    private String reviewedBy;
+    private LocalDateTime reviewedAt;
     private Integer version;
     private String qualityStatus;
     private String status;

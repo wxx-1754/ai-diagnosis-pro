@@ -5,6 +5,7 @@ export function railHtml(active, { bottom } = {}) {
   const overviewActive = active === 'overview' ? ' is-active' : '';
   const studioActive = active === 'studio' ? ' is-active' : '';
   const knowledgeActive = active === 'knowledge' ? ' is-active' : '';
+  const adminActive = active === 'admin' ? ' is-active' : '';
   const railBottom = bottom ?? `
     <div class="rail-status">
       <span class="rail-state" data-state="ready" aria-hidden="true"></span>
@@ -44,6 +45,13 @@ export function railHtml(active, { bottom } = {}) {
           <span class="rail-item-text">
             <strong>知识库</strong>
             <small>RAG 参考知识</small>
+          </span>
+        </button>
+        <button class="rail-item${adminActive}" type="button" data-route="/admin" aria-label="实例与数据源" title="实例与数据源">
+          <span class="rail-item-icon" aria-hidden="true"><i class="ph ph-hard-drives"></i></span>
+          <span class="rail-item-text">
+            <strong>实例与数据源</strong>
+            <small>基础设施配置</small>
           </span>
         </button>
       </nav>

@@ -206,5 +206,10 @@ class DiagnoseTaskServiceTest {
             deleted.add(taskNo);
             return 1;
         }
+
+        @Override
+        public long countByAppIdAndEnv(String appId, String env) {
+            return 0;
+        }
     }
 }

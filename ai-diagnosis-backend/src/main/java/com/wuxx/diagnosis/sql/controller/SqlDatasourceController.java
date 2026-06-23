@@ -18,7 +18,7 @@ public class SqlDatasourceController {
     private final SqlDatasourceService datasourceService;
 
     @GetMapping("/options")
-    public List<SqlDatasourceOption> options(@RequestParam String env) {
-        return datasourceService.options(env);
+    public List<SqlDatasourceOption> options(@RequestParam String appId, @RequestParam String env) {
+        return datasourceService.options(appId, env);
     }
 }

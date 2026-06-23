@@ -51,6 +51,11 @@ public class KnowledgeRetrievalService {
             if (!scopeMatches(document.getMetadata(), request)) {
                 continue;
             }
+            KbDocument storedDocument = documentMapper.findByDocNo(
+                    String.valueOf(document.getMetadata().get("docNo")));
+            if (!isSearchable(storedDocument)) {
+                continue;
+            }
             double vectorScore = document.getScore() == null ? 0.0 : document.getScore();
             merged.put(document.getId(), Candidate.fromVector(document, vectorScore));
         }
@@ -58,7 +63,7 @@ public class KnowledgeRetrievalService {
         try {
             for (KbChunk chunk : chunkMapper.fullTextSearch(request.getQuestion(), candidates)) {
                 KbDocument document = documentMapper.findByDocNo(chunk.getDocNo());
-                if (document == null || !scopeMatches(document, request)) {
+                if (!isSearchable(document) || !scopeMatches(document, request)) {
                     continue;
                 }
                 merged.compute(chunk.getVectorId(), (key, current) -> {
@@ -132,6 +137,12 @@ public class KnowledgeRetrievalService {
         return matches(document.getDiagnoseType(), request.getDiagnoseType())
                 && matches(document.getAppId(), request.getAppId())
                 && matches(document.getEnv(), request.getEnv());
+    }
+
+    private boolean isSearchable(KbDocument document) {
+        return document != null
+                && "APPROVED".equals(document.getQualityStatus())
+                && "INDEXED".equals(document.getStatus());
     }
 
     private boolean matches(String stored, String requested) {
